@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bugvert — Smart Unit & Price Converter</title>
+<link rel="icon" href="images/bugvert.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&family=Noto+Sans+Arabic:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header id="app-header">
+<div class="brand">
+<img src="images/bugvert.svg" alt="Bugvert logo" class="brand-icon">
+<div><h1>bugvert</h1><p>smart unit &amp; price conversion</p></div>
+</div>
+<div class="header-actions">
+<button id="sample-btn" class="ghost">Load sample</button>
+<button id="reset-btn" class="ghost">Reset</button>
+</div>
+</header>
+<main>
+<section id="input-section" class="card">
+<div id="drop-zone">
+<input type="file" id="file-input" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden>
+<div class="drop-inner">
+<strong>Drop an .xlsx / .csv file</strong>
+<span>or <button id="browse-btn" class="link">browse</button> — or paste TSV below</span>
+</div>
+</div>
+<textarea id="paste-input" placeholder="Paste rows from Excel here (tab separated, first row = headers)…" spellcheck="false"></textarea>
+<div class="row-end"><button id="parse-btn" class="primary">Analyze data</button></div>
+</section>
+<section id="settings-section" class="card hidden">
+<div class="settings-grid">
+<label>Unit column<select id="unit-col"></select></label>
+<label>Price column<select id="price-col"></select></label>
+<label>Name column<select id="name-col"></select></label>
+<label>Quantity column<select id="qty-col"></select></label>
+<label>Direction
+<select id="direction">
+<option value="toBase">Pack → single unit</option>
+<option value="toPack">Single unit → pack</option>
+</select></label>
+<label id="pack-size-wrap" class="hidden">Target pack size<input type="number" id="pack-size" value="10" min="1"></label>
+<label>Decimals<input type="number" id="decimals" value="4" min="0" max="8"></label>
+<label class="check"><input type="checkbox" id="merge-toggle"> Merge same name + unit</label>
+</div>
+<div id="unit-chips-wrap">
+<h3>Convert these units</h3>
+<div id="unit-chips"></div>
+</div>
+<div id="suggestions"></div>
+</section>
+<section id="result-section" class="card hidden">
+<div class="result-bar">
+<div id="stats"></div>
+<div class="result-actions">
+<button id="copy-sel-btn" class="ghost">Copy selected columns</button>
+<button id="copy-all-btn" class="ghost">Copy all TSV</button>
+<button id="download-btn" class="primary">Download .xlsx</button>
+</div>
+</div>
+<div id="table-wrap"><table id="result-table"></table></div>
+</section>
+</main>
+<div id="toast"></div>
+<script src="js/xlsx.full.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
