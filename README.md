@@ -7,6 +7,8 @@ Plain JavaScript app that reads a messy pharmacy/inventory table (xlsx, csv or p
 - Messy data: finds the header row, drops empty rows/columns and repeated headers, handles Arabic numerals, invisible direction marks, extra spaces, `10T` / `10  T` / `2x10 T` / `T10` / single words like `Syringe`
 - Picks the unit, price, name and quantity columns from their contents plus header words (Arabic and English); each can be changed
 - 15 unit families from aliases (tab, cap, supp, sachet, amp, vial, syringe, inh, bottle, tube, patch, drop, lozenge, box, strip). Unknown words become their own group that can still be converted
+- Each column can have only one role. Picking a column that already has another role swaps the two, and table headers show a role badge
+- Quantity is never multiplied by price. The Qty ↦ column appears only when "Rescale quantity to new unit" or merge is on
 - Chips choose which units to convert; units already at 1 (Syringe, Inh) start off
 - Direction: pack → single unit, or single unit → pack of N; quantity is scaled the opposite way to price
 - Optional merge of same name + unit after conversion. Merged price: weighted by quantity, highest, lowest or first seen. Factor shows `mixed` when merged rows came from different packs. Merged rows whose prices differ by more than 50% are highlighted and reported

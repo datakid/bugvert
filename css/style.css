@@ -39,6 +39,8 @@ table{border-collapse:collapse;width:100%;font-size:13px}
 th{position:sticky;top:0;background:var(--sand);text-align:left;padding:8px 10px;white-space:nowrap;cursor:pointer;z-index:1}
 th.sel{background:var(--clay);color:#fff}
 th.new{box-shadow:inset 0 -3px var(--sage)}
+th .role{display:inline-block;margin-inline-start:6px;padding:1px 7px;border-radius:999px;background:var(--clay);color:#fff;font-size:10px;font-weight:600;vertical-align:middle}
+th.sel .role{background:#fff;color:var(--clay)}
 td{padding:6px 10px;border-top:1px solid var(--line);white-space:nowrap}
 tr.skip td{color:var(--muted)}
 tr.merged td{background:#F4F8F5}

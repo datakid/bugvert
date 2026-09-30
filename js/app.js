@@ -77,6 +77,7 @@ const hint = k => HINTS[k].some(w => hl.includes(w)) ? 1 : 0;
 const nums = vals.map(parseNum);
 const numericRatio = vals.filter(v => /^[\d\s.,\-٠-٩٫]+$/.test(clean(v)) && parseNum(v) !== null).length / n;
 const unitRatio = vals.filter(v => { const p = parseUnit(v); return p && !p.bare && clean(v).length <= 14; }).length / n;
+const knownRatio = vals.filter(v => { const p = parseUnit(v); return p && !p.family.startsWith('x:') && clean(v).length <= 14; }).length / n;
 const packRatio = vals.filter(v => /\d\s*[A-Za-z\u0600-\u06FF]/.test(clean(v)) && clean(v).length <= 14).length / n;
 const uniq = new Set(vals.map(clean)).size / n;
 const avgLen = vals.reduce((a, v) => a + clean(v).length, 0) / n;
@@ -85,7 +86,7 @@ const decRatio = nums.filter(x => x !== null && Math.abs(x % 1) > 0).length / n;
 const fill = vals.length / (sample.length || 1);
 return {
 i,
-unit: unitRatio * 2 + packRatio * 2 + (uniq < .3 ? .5 : 0) - (avgLen > 16 ? 2 : 0) + hint('unit') * 3,
+unit: unitRatio + knownRatio * 2 + packRatio * 2 + (uniq < .3 ? .5 : 0) - (avgLen > 16 ? 2 : 0) + hint('unit') * 3,
 price: numericRatio * 2 + decRatio + fill * .5 + hint('price') * 3 - (clean(h).match(/قيمة|value|total/i) ? 1.5 : 0),
 name: latinRatio + uniq * 2 + Math.min(avgLen, 30) / 15 - numericRatio * 3 - unitRatio * 2 + hint('name') * 3,
 qty: numericRatio * 1.5 - decRatio + (fill < .9 ? .3 : 0) + hint('qty') * 3 - hint('price') * 3
@@ -130,6 +131,8 @@ const headers = grid[hr].map((h, i) => clean(h) || 'Column ' + (i + 1));
 const seen = {};
 state.headers = headers.map(h => seen[h] ? h + ' (' + (++seen[h]) + ')' : (seen[h] = 1, h));
 state.rows = grid.slice(hr + 1).filter(r => !r.every((c, i) => clean(c) === clean(grid[hr][i])));
+if (!state.rows.length) return toast('Only a header row was found');
+state.selected.clear();
 pickCols();
 analyze(true);
 $('#settings-section').classList.remove('hidden');
@@ -159,9 +162,30 @@ renderChips();
 run();
 }
 
+const ROLES = ['unit', 'price', 'name', 'qty'];
+const ROLE_LABEL = {unit: 'Unit', price: 'Price', name: 'Name', qty: 'Quantity'};
 function fillSelects() {
-const opts = '<option value="-1">— none —</option>' + state.headers.map((h, i) => `<option value="${i}">${esc(h)}</option>`).join('');
-['unit', 'price', 'name', 'qty'].forEach(k => { const el = $('#' + k + '-col'); el.innerHTML = opts; el.value = state.cols[k]; });
+ROLES.forEach(k => {
+const el = $('#' + k + '-col');
+el.innerHTML = '<option value="-1">— none —</option>' + state.headers.map((h, i) => {
+const other = ROLES.find(r => r !== k && state.cols[r] === i);
+return `<option value="${i}">${esc(h)}${other ? ' · ' + ROLE_LABEL[other] : ''}</option>`;
+}).join('');
+el.value = String(state.cols[k]);
+});
+}
+function setRole(k, v) {
+const prev = state.cols[k];
+if (prev === v) return;
+const clash = v >= 0 ? ROLES.find(r => r !== k && state.cols[r] === v) : null;
+state.cols[k] = v;
+if (clash) {
+state.cols[clash] = prev;
+toast(`${ROLE_LABEL[clash]} moved to ${prev >= 0 ? '“' + state.headers[prev] + '”' : 'none'}`);
+}
+state.selected.clear();
+fillSelects();
+analyze(k === 'unit' || clash === 'unit');
 }
 
 function renderChips() {
@@ -178,6 +202,7 @@ const unparsed = state.parsed.filter((p, i) => !p && clean(state.rows[i][state.c
 if (unparsed) s.push(`${unparsed} rows have unreadable units and were left untouched.`);
 const noPrice = state.cols.price >= 0 ? state.rows.filter(r => parseNum(r[state.cols.price]) === null).length : 0;
 if (noPrice) s.push(`${noPrice} rows have no valid price.`);
+if ($('#merge-toggle').checked && state.cols.name < 0) s.push('Merging needs a name column — pick one above.');
 if (!$('#merge-toggle').checked && out.dupes) s.push(`${out.dupes} items share name + unit after conversion — enable merge to combine them.`);
 if ($('#merge-toggle').checked && out.conflicts) s.push(`${out.conflicts} merged items combined prices that differ by more than 50% — review the highlighted rows or change the merged price rule.`);
 const counts = {};
@@ -193,8 +218,10 @@ function run() {
 const {unit, price, name, qty} = state.cols;
 const dir = $('#direction').value;
 const pack = Math.max(1, parseNum($('#pack-size').value) || 1);
-const dec = Math.min(8, Math.max(0, parseInt($('#decimals').value) || 0));
-const merge = $('#merge-toggle').checked;
+const dRaw = parseInt($('#decimals').value);
+const dec = isNaN(dRaw) ? 4 : Math.min(8, Math.max(0, dRaw));
+const merge = $('#merge-toggle').checked && name >= 0;
+const rescaleQty = qty >= 0 && ($('#qty-toggle').checked || merge);
 let items = state.rows.map((r, i) => {
 const p = state.parsed[i];
 const pr = price >= 0 ? parseNum(r[price]) : null;
@@ -207,10 +234,10 @@ const factor = target / p.count;
 if (factor === 1) return {...base, unitOut: `${target} ${f.label}`, converted: true};
 return {...base, unitOut: `${target} ${f.label}`, priceOut: pr == null ? null : pr * factor, qtyOut: q == null ? null : q / factor, factor, converted: true, count: 1};
 });
-const keyOf = it => (name >= 0 ? clean(it.row[name]).toLowerCase().replace(/\s+/g, ' ') : '') + '|' + it.unitOut.toLowerCase().replace(/\s+/g, '');
+const keyOf = (it, i) => name >= 0 && clean(it.row[name]) ? clean(it.row[name]).toLowerCase() + '|' + it.unitOut.toLowerCase().replace(/\s+/g, '') : '#' + i;
 const groups = new Map();
-items.forEach(it => { const k = keyOf(it); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); });
-const dupes = [...groups.values()].filter(g => g.length > 1).reduce((a, g) => a + g.length, 0);
+items.forEach((it, i) => { const k = keyOf(it, i); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); });
+const dupes = name >= 0 ? [...groups.values()].filter(g => g.length > 1).reduce((a, g) => a + g.length, 0) : 0;
 if (merge) {
 const strat = $('#merge-price') ? $('#merge-price').value : 'weighted';
 items = [...groups.values()].map(g => {
@@ -232,11 +259,11 @@ return {...g[0], priceOut: p, qtyOut: qty >= 0 && hasQ ? tq : null, factor: facs
 });
 }
 const headers = state.headers.slice();
-const addCols = ['Unit ↦', 'Price ↦'].concat(qty >= 0 ? ['Qty ↦'] : []).concat(['Factor']).concat(merge ? ['Merged'] : []);
+const addCols = ['Unit ↦', 'Price ↦'].concat(rescaleQty ? ['Qty ↦'] : []).concat(['Factor']).concat(merge ? ['Merged'] : []);
 const data = items.map(it => {
 const base = it.row.slice();
 const extra = [it.unitOut, it.priceOut == null ? '' : round(it.priceOut, dec)];
-if (qty >= 0) extra.push(it.qtyOut == null ? '' : round(it.qtyOut, dec));
+if (rescaleQty) extra.push(it.qtyOut == null ? '' : round(it.qtyOut, dec));
 extra.push(it.factor == null ? 'mixed' : round(it.factor, 6));
 if (merge) extra.push(it.merged || 1);
 return {cells: base.concat(extra), it};
@@ -251,8 +278,9 @@ $('#stats').innerHTML = `<span><b>${state.rows.length}</b> rows</span><span><b>$
 function renderTable() {
 const o = state.output;
 const LIMIT = 1500;
-const numIdx = new Set([state.cols.price, state.cols.qty, ...o.headers.map((_, i) => i).filter(i => i >= o.extraStart + 1)]);
-let h = '<thead><tr>' + o.headers.map((x, i) => `<th data-i="${i}" class="${state.selected.has(i) ? 'sel' : ''} ${i >= o.extraStart ? 'new' : ''}">${esc(x)}</th>`).join('') + '</tr></thead><tbody>';
+const numIdx = new Set([state.cols.price, state.cols.qty, ...o.headers.map((_, i) => i).filter(i => i >= o.extraStart + 1 && o.headers[i] !== 'Merged')]);
+const roleOf = i => ROLES.find(r => state.cols[r] === i);
+let h = '<thead><tr>' + o.headers.map((x, i) => `<th data-i="${i}" class="${state.selected.has(i) ? 'sel' : ''} ${i >= o.extraStart ? 'new' : ''}">${esc(x)}${i < o.extraStart && roleOf(i) ? `<span class="role">${ROLE_LABEL[roleOf(i)]}</span>` : ''}</th>`).join('') + '</tr></thead><tbody>';
 h += o.data.slice(0, LIMIT).map(d => `<tr class="${d.it.spread > 1.5 ? 'conflict' : ''} ${d.it.merged > 1 ? 'merged' : ''} ${!d.it.converted ? 'skip' : ''}">` + d.cells.map((c, i) => `<td class="${numIdx.has(i) ? 'num' : ''}">${esc(c)}</td>`).join('') + '</tr>').join('');
 if (o.data.length > LIMIT) h += `<tr><td colspan="${o.headers.length}">Showing ${LIMIT} of ${o.data.length} rows — export includes all.</td></tr>`;
 $('#result-table').innerHTML = h + '</tbody>';
@@ -275,18 +303,22 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 
 function parseText(txt) {
 const lines = txt.replace(/\r/g, '').split('\n');
-const delim = lines.slice(0, 10).some(l => l.includes('\t')) ? '\t' : (lines.slice(0, 10).filter(l => l.includes(';')).length > lines.slice(0, 10).filter(l => l.includes(',')).length ? ';' : ',');
-return lines.map(l => l.split(delim).map(c => c.replace(/^"|"$/g, '')));
+if (lines.slice(0, 10).some(l => l.includes('\t'))) return lines.map(l => l.split('\t').map(c => c.replace(/^"(.*)"$/, '$1')));
+const wb = XLSX.read(txt, {type: 'string', raw: true});
+return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
 }
 
 function readFile(file) {
 state.fileName = file.name.replace(/\.[^.]+$/, '') || 'bugvert';
 const r = new FileReader();
-if (/\.(xlsx|xls|ods)$/i.test(file.name)) {
+r.onerror = () => toast('Could not read this file');
+if (/\.(xlsx|xlsm|xls|ods)$/i.test(file.name)) {
 r.onload = e => {
+try {
 const wb = XLSX.read(new Uint8Array(e.target.result), {type: 'array'});
-const ws = wb.Sheets[wb.SheetNames[0]];
-loadGrid(XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ''}));
+const name = wb.SheetNames.find(n => { const ref = wb.Sheets[n]['!ref']; return ref && ref !== 'A1'; }) || wb.SheetNames[0];
+loadGrid(XLSX.utils.sheet_to_json(wb.Sheets[name], {header: 1, raw: true, defval: ''}));
+} catch { toast('Could not read this file'); }
 };
 r.readAsArrayBuffer(file);
 } else { r.onload = e => loadGrid(parseText(e.target.result)); r.readAsText(file); }
@@ -323,7 +355,7 @@ const SAMPLE = `الصرف\tالرقم\tالاسم\tالوحدة\tالرصيد\t
 
 $('#browse-btn').onclick = e => { e.stopPropagation(); $('#file-input').click(); };
 $('#drop-zone').onclick = () => $('#file-input').click();
-$('#file-input').onchange = e => e.target.files[0] && readFile(e.target.files[0]);
+$('#file-input').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0]); e.target.value = ''; };
 ['dragenter', 'dragover'].forEach(ev => $('#drop-zone').addEventListener(ev, e => { e.preventDefault(); $('#drop-zone').classList.add('over'); }));
 ['dragleave', 'drop'].forEach(ev => $('#drop-zone').addEventListener(ev, e => { e.preventDefault(); $('#drop-zone').classList.remove('over'); }));
 $('#drop-zone').addEventListener('drop', e => e.dataTransfer.files[0] && readFile(e.dataTransfer.files[0]));
@@ -331,9 +363,10 @@ $('#parse-btn').onclick = () => { const t = $('#paste-input').value; if (!t.trim
 $('#paste-input').addEventListener('paste', () => setTimeout(() => $('#parse-btn').click(), 0));
 $('#sample-btn').onclick = () => { $('#paste-input').value = SAMPLE; $('#parse-btn').click(); };
 $('#reset-btn').onclick = () => location.reload();
-['unit', 'price', 'name', 'qty'].forEach(k => $('#' + k + '-col').onchange = e => { state.cols[k] = +e.target.value; analyze(k === 'unit'); });
+ROLES.forEach(k => $('#' + k + '-col').onchange = e => setRole(k, +e.target.value));
 $('#direction').onchange = e => { $('#pack-size-wrap').classList.toggle('hidden', e.target.value !== 'toPack'); run(); };
-['#pack-size', '#decimals'].forEach(s => $(s).oninput = run);
+['#pack-size', '#decimals'].forEach(s => $(s).oninput = () => state.output && run());
+$('#qty-toggle').onchange = () => { state.selected.clear(); run(); };
 $('#merge-toggle').onchange = e => {
 let w = $('#merge-price-wrap');
 if (!w) {
@@ -348,10 +381,11 @@ run();
 };
 $('#unit-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; const f = c.dataset.f; state.enabled.has(f) ? state.enabled.delete(f) : state.enabled.add(f); renderChips(); run(); };
 $('#result-table').onclick = e => { const th = e.target.closest('th'); if (!th) return; const i = +th.dataset.i; state.selected.has(i) ? state.selected.delete(i) : state.selected.add(i); th.classList.toggle('sel'); };
-$('#copy-sel-btn').onclick = () => { if (!state.selected.size) return toast('Click column headers to select them'); copy(toTSV([...state.selected].sort((a, b) => a - b))); };
-$('#copy-all-btn').onclick = () => copy(toTSV());
+$('#copy-sel-btn').onclick = () => { if (!state.output) return; if (!state.selected.size) return toast('Click column headers to select them'); copy(toTSV([...state.selected].sort((a, b) => a - b))); };
+$('#copy-all-btn').onclick = () => state.output && copy(toTSV());
 $('#download-btn').onclick = () => {
 const o = state.output;
+if (!o) return;
 const idx = state.selected.size ? [...state.selected].sort((a, b) => a - b) : o.headers.map((_, i) => i);
 const aoa = [idx.map(i => o.headers[i])].concat(o.data.map(d => idx.map(i => d.cells[i])));
 const wb = XLSX.utils.book_new();
