@@ -26,7 +26,7 @@ price: ['price','cost','السعر','سعر','ثمن'],
 name: ['name','item','product','drug','description','الاسم','اسم','الصنف'],
 qty: ['qty','quantity','stock','balance','الرصيد','رصيد','الكمية','كمية']
 };
-const state = {headers: [], rows: [], cols: {}, parsed: [], families: {}, enabled: new Set(), selected: new Set(), output: null, fileName: 'bugvert'};
+const state = {headers: [], rows: [], cols: {}, parsed: [], families: {}, enabled: new Set(), offCols: new Set(), offRows: new Set(), output: null, fileName: 'bugvert'};
 
 const toLatin = s => String(s ?? '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/٫/g, '.').replace(/[٬،]/g, ',');
 const clean = s => toLatin(s).replace(/[\u200e\u200f\u00a0\u202a-\u202e]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -132,7 +132,8 @@ const seen = {};
 state.headers = headers.map(h => seen[h] ? h + ' (' + (++seen[h]) + ')' : (seen[h] = 1, h));
 state.rows = grid.slice(hr + 1).filter(r => !r.every((c, i) => clean(c) === clean(grid[hr][i])));
 if (!state.rows.length) return toast('Only a header row was found');
-state.selected.clear();
+state.offCols.clear();
+state.offRows.clear();
 pickCols();
 analyze(true);
 $('#settings-section').classList.remove('hidden');
@@ -183,7 +184,6 @@ if (clash) {
 state.cols[clash] = prev;
 toast(`${ROLE_LABEL[clash]} moved to ${prev >= 0 ? '“' + state.headers[prev] + '”' : 'none'}`);
 }
-state.selected.clear();
 fillSelects();
 analyze(k === 'unit' || clash === 'unit');
 }
@@ -222,11 +222,13 @@ const dRaw = parseInt($('#decimals').value);
 const dec = isNaN(dRaw) ? 4 : Math.min(8, Math.max(0, dRaw));
 const merge = $('#merge-toggle').checked && name >= 0;
 const rescaleQty = qty >= 0 && ($('#qty-toggle').checked || merge);
+const withValue = $('#value-toggle').checked && price >= 0 && qty >= 0;
+const valueBasis = $('#value-basis').value;
 let items = state.rows.map((r, i) => {
 const p = state.parsed[i];
 const pr = price >= 0 ? parseNum(r[price]) : null;
 const q = qty >= 0 ? parseNum(r[qty]) : null;
-const base = {row: r, unitOut: unit >= 0 ? clean(r[unit]) : '', priceOut: pr, qtyOut: q, factor: 1, converted: false, count: 1};
+const base = {src: i, row: r, unitOut: unit >= 0 ? clean(r[unit]) : '', priceOut: pr, qtyOut: q, qtyIn: q, factor: 1, converted: false, count: 1};
 if (!p || !state.enabled.has(p.family)) return base;
 const f = state.families[p.family];
 const target = dir === 'toBase' ? 1 : pack;
@@ -243,6 +245,7 @@ const strat = $('#merge-price') ? $('#merge-price').value : 'weighted';
 items = [...groups.values()].map(g => {
 if (g.length === 1) return g[0];
 const tq = g.reduce((a, x) => a + (x.qtyOut || 0), 0);
+const tqIn = g.reduce((a, x) => a + (x.qtyIn || 0), 0);
 const hasQ = g.some(x => x.qtyOut != null);
 const facs = new Set(g.map(x => round(x.factor, 6)));
 const prices = g.map(x => x.priceOut).filter(x => x != null);
@@ -255,42 +258,95 @@ else if (tq > 0) p = g.reduce((a, x) => a + (x.priceOut || 0) * (x.qtyOut || 0),
 else p = prices.reduce((a, b) => a + b, 0) / prices.length;
 }
 const spread = prices.length > 1 ? Math.max(...prices) / Math.max(Math.min(...prices), 1e-9) : 1;
-return {...g[0], priceOut: p, qtyOut: qty >= 0 && hasQ ? tq : null, factor: facs.size === 1 ? g[0].factor : null, merged: g.length, spread};
+return {...g[0], priceOut: p, qtyOut: qty >= 0 && hasQ ? tq : null, qtyIn: qty >= 0 && hasQ ? tqIn : null, factor: facs.size === 1 ? g[0].factor : null, merged: g.length, spread};
 });
 }
-const headers = state.headers.slice();
-const addCols = ['Unit ↦', 'Price ↦'].concat(rescaleQty ? ['Qty ↦'] : []).concat(['Factor']).concat(merge ? ['Merged'] : []);
+const num = v => v == null || !isFinite(v) ? null : round(v, dec);
+const cols = state.headers.map((h, i) => ({key: 'o:' + h, label: h, isNew: false, num: i === price || i === qty}));
+const add = (label, num) => cols.push({key: 'n:' + label, label, isNew: true, num});
+add('Unit ↦', false);
+add('Price ↦', true);
+if (rescaleQty) add('Qty ↦', true);
+if (withValue) add('Value ↦', true);
+add('Factor', true);
+if (merge) add('Merged', true);
 const data = items.map(it => {
-const base = it.row.slice();
-const extra = [it.unitOut, it.priceOut == null ? '' : round(it.priceOut, dec)];
-if (rescaleQty) extra.push(it.qtyOut == null ? '' : round(it.qtyOut, dec));
-extra.push(it.factor == null ? 'mixed' : round(it.factor, 6));
+const extra = [it.unitOut || null, num(it.priceOut)];
+if (rescaleQty) extra.push(num(it.qtyOut));
+if (withValue) {
+const qv = valueBasis === 'orig' ? it.qtyIn : it.qtyOut;
+extra.push(it.priceOut == null || qv == null ? null : num(it.priceOut * qv));
+}
+extra.push(it.factor == null ? null : round(it.factor, 6));
 if (merge) extra.push(it.merged || 1);
-return {cells: base.concat(extra), it};
+return {cells: it.row.slice().concat(extra), it};
 });
-state.output = {headers: headers.concat(addCols), data, extraStart: headers.length, dupes, conflicts: items.filter(i => i.spread > 1.5).length};
+state.output = {cols, headers: cols.map(c => c.label), data, extraStart: state.headers.length, dupes, conflicts: items.filter(i => i.spread > 1.5).length};
 renderTable();
 suggest(state.output);
 const conv = items.filter(i => i.converted && i.factor !== 1).length;
 $('#stats').innerHTML = `<span><b>${state.rows.length}</b> rows</span><span><b>${conv}</b> converted</span>${merge ? `<span><b>${items.length}</b> after merge</span>` : ''}`;
 }
 
+function rowPasses(d) {
+const it = d.it, f = $('#row-filter').value;
+if (f === 'converted') return it.converted && it.factor !== 1;
+if (f === 'unchanged') return !(it.converted && it.factor !== 1);
+if (f === 'priced') return it.priceOut != null;
+if (f === 'stocked') return (it.qtyOut ?? it.qtyIn ?? 0) > 0;
+return true;
+}
+const visibleRows = () => state.output.data.filter(rowPasses);
+const exportRows = () => visibleRows().filter(d => !state.offRows.has(d.it.src));
+const exportCols = () => state.output.cols.map((c, i) => ({...c, i})).filter(c => !state.offCols.has(c.key));
+
 function renderTable() {
 const o = state.output;
 const LIMIT = 1500;
-const numIdx = new Set([state.cols.price, state.cols.qty, ...o.headers.map((_, i) => i).filter(i => i >= o.extraStart + 1 && o.headers[i] !== 'Merged')]);
 const roleOf = i => ROLES.find(r => state.cols[r] === i);
-let h = '<thead><tr>' + o.headers.map((x, i) => `<th data-i="${i}" class="${state.selected.has(i) ? 'sel' : ''} ${i >= o.extraStart ? 'new' : ''}">${esc(x)}${i < o.extraStart && roleOf(i) ? `<span class="role">${ROLE_LABEL[roleOf(i)]}</span>` : ''}</th>`).join('') + '</tr></thead><tbody>';
-h += o.data.slice(0, LIMIT).map(d => `<tr class="${d.it.spread > 1.5 ? 'conflict' : ''} ${d.it.merged > 1 ? 'merged' : ''} ${!d.it.converted ? 'skip' : ''}">` + d.cells.map((c, i) => `<td class="${numIdx.has(i) ? 'num' : ''}">${esc(c)}</td>`).join('') + '</tr>').join('');
-if (o.data.length > LIMIT) h += `<tr><td colspan="${o.headers.length}">Showing ${LIMIT} of ${o.data.length} rows — export includes all.</td></tr>`;
+const rows = visibleRows();
+const onCount = rows.filter(d => !state.offRows.has(d.it.src)).length;
+const allOn = rows.length && onCount === rows.length;
+let h = `<thead><tr><th class="cb-col"><input type="checkbox" id="all-rows" aria-label="Include all rows" ${allOn ? 'checked' : ''}></th>` + o.cols.map((c, i) => {
+const off = state.offCols.has(c.key);
+const role = !c.isNew && roleOf(i);
+return `<th class="${c.isNew ? 'new' : ''} ${off ? 'off' : ''}"><label class="col-toggle"><input type="checkbox" class="col-cb" data-key="${esc(c.key)}" ${off ? '' : 'checked'}><span>${esc(c.label)}</span>${role ? `<span class="role">${ROLE_LABEL[role]}</span>` : ''}</label></th>`;
+}).join('') + '</tr></thead><tbody>';
+h += rows.slice(0, LIMIT).map(d => {
+const offR = state.offRows.has(d.it.src);
+return `<tr class="${d.it.spread > 1.5 ? 'conflict' : ''} ${d.it.merged > 1 ? 'merged' : ''} ${!d.it.converted ? 'skip' : ''} ${offR ? 'off' : ''}"><td class="cb-col"><input type="checkbox" class="row-cb" data-src="${d.it.src}" ${offR ? '' : 'checked'} aria-label="Include row"></td>` + d.cells.map((c, i) => `<td class="${o.cols[i].num ? 'num' : ''} ${state.offCols.has(o.cols[i].key) ? 'off' : ''}">${esc(c ?? '')}</td>`).join('') + '</tr>';
+}).join('');
+if (!rows.length) h += `<tr><td colspan="${o.cols.length + 1}" class="empty">No rows match this filter.</td></tr>`;
+if (rows.length > LIMIT) h += `<tr><td colspan="${o.cols.length + 1}" class="empty">Showing ${LIMIT} of ${rows.length} rows — export includes all of them.</td></tr>`;
 $('#result-table').innerHTML = h + '</tbody>';
+const ind = $('#all-rows');
+if (ind) ind.indeterminate = onCount > 0 && onCount < rows.length;
+updateSummary();
 }
 
-function toTSV(cols) {
-const o = state.output;
-const idx = cols && cols.length ? cols : o.headers.map((_, i) => i);
-const cell = v => String(v ?? '').replace(/[\t\r\n]+/g, ' ');
-return [idx.map(i => cell(o.headers[i]))].concat(o.data.map(d => idx.map(i => cell(d.cells[i])))).map(r => r.join('\t')).join('\n');
+function updateSummary() {
+const r = exportRows().length, c = exportCols().length;
+$('#export-summary').innerHTML = `Exporting <b>${r}</b> rows × <b>${c}</b> columns`;
+}
+
+function exportValue(v, isNum) {
+if (v == null) return null;
+if (typeof v === 'number') return isFinite(v) ? v : null;
+const s = clean(v);
+if (s === '' || /^(null|undefined|nan)$/i.test(s)) return null;
+if (/^-?\d+(\.\d+)?$/.test(s) && !/^-?0\d/.test(s)) return Number(s);
+if (isNum) { const n = parseNum(s); if (n !== null) return n; }
+return String(v).trim();
+}
+
+function exportGrid() {
+const cols = exportCols();
+return [cols.map(c => c.label)].concat(exportRows().map(d => cols.map(c => exportValue(d.cells[c.i], c.num))));
+}
+
+function toTSV() {
+const cell = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
+return exportGrid().map(r => r.map(cell).join('\t')).join('\n');
 }
 
 async function copy(text) {
@@ -366,7 +422,29 @@ $('#reset-btn').onclick = () => location.reload();
 ROLES.forEach(k => $('#' + k + '-col').onchange = e => setRole(k, +e.target.value));
 $('#direction').onchange = e => { $('#pack-size-wrap').classList.toggle('hidden', e.target.value !== 'toPack'); run(); };
 ['#pack-size', '#decimals'].forEach(s => $(s).oninput = () => state.output && run());
-$('#qty-toggle').onchange = () => { state.selected.clear(); run(); };
+$('#qty-toggle').onchange = run;
+$('#value-toggle').onchange = e => {
+if (e.target.checked && (state.cols.price < 0 || state.cols.qty < 0)) toast('Pick a price and a quantity column first');
+$('#value-basis-wrap').classList.toggle('hidden', !e.target.checked);
+run();
+};
+$('#value-basis').onchange = run;
+$('#row-filter').onchange = renderTable;
+document.querySelector('.export-bar').onclick = e => {
+const b = e.target.closest('[data-cols]');
+if (!b || !state.output) return;
+const m = b.dataset.cols;
+state.offCols = new Set(state.output.cols.filter(c => m === 'none' || (m === 'orig' && c.isNew) || (m === 'new' && !c.isNew)).map(c => c.key));
+renderTable();
+};
+$('#result-table').onchange = e => {
+const t = e.target;
+if (t.classList.contains('col-cb')) t.checked ? state.offCols.delete(t.dataset.key) : state.offCols.add(t.dataset.key);
+else if (t.classList.contains('row-cb')) t.checked ? state.offRows.delete(+t.dataset.src) : state.offRows.add(+t.dataset.src);
+else if (t.id === 'all-rows') visibleRows().forEach(d => t.checked ? state.offRows.delete(d.it.src) : state.offRows.add(d.it.src));
+else return;
+renderTable();
+};
 $('#merge-toggle').onchange = e => {
 let w = $('#merge-price-wrap');
 if (!w) {
@@ -376,20 +454,23 @@ $('.settings-grid').appendChild(w);
 $('#merge-price').onchange = run;
 }
 w.classList.toggle('hidden', !e.target.checked);
-state.selected.clear();
 run();
 };
 $('#unit-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; const f = c.dataset.f; state.enabled.has(f) ? state.enabled.delete(f) : state.enabled.add(f); renderChips(); run(); };
-$('#result-table').onclick = e => { const th = e.target.closest('th'); if (!th) return; const i = +th.dataset.i; state.selected.has(i) ? state.selected.delete(i) : state.selected.add(i); th.classList.toggle('sel'); };
-$('#copy-sel-btn').onclick = () => { if (!state.output) return; if (!state.selected.size) return toast('Click column headers to select them'); copy(toTSV([...state.selected].sort((a, b) => a - b))); };
-$('#copy-all-btn').onclick = () => state.output && copy(toTSV());
+const canExport = () => {
+if (!state.output) return false;
+if (!exportCols().length) { toast('Tick at least one column'); return false; }
+if (!exportRows().length) { toast('No rows are ticked'); return false; }
+return true;
+};
+$('#copy-btn').onclick = () => canExport() && copy(toTSV());
 $('#download-btn').onclick = () => {
-const o = state.output;
-if (!o) return;
-const idx = state.selected.size ? [...state.selected].sort((a, b) => a - b) : o.headers.map((_, i) => i);
-const aoa = [idx.map(i => o.headers[i])].concat(o.data.map(d => idx.map(i => d.cells[i])));
+if (!canExport()) return;
+const grid = exportGrid();
+const ws = XLSX.utils.aoa_to_sheet(grid);
+ws['!cols'] = grid[0].map((_, c) => ({wch: Math.min(40, Math.max(8, ...grid.slice(0, 200).map(r => String(r[c] ?? '').length + 2)))}));
 const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Converted');
+XLSX.utils.book_append_sheet(wb, ws, 'Converted');
 XLSX.writeFile(wb, state.fileName + '-bugvert.xlsx');
 };
 })();

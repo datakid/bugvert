@@ -46,6 +46,12 @@
 <label>Decimals<input type="number" id="decimals" value="4" min="0" max="8"></label>
 <label class="check"><input type="checkbox" id="merge-toggle"> Merge same name + unit</label>
 <label class="check"><input type="checkbox" id="qty-toggle"> Rescale quantity to new unit</label>
+<label class="check"><input type="checkbox" id="value-toggle"> Add value column (price × qty)</label>
+<label id="value-basis-wrap" class="hidden">Value = Price ↦ ×
+<select id="value-basis">
+<option value="new">Rescaled Qty ↦</option>
+<option value="orig">Original quantity</option>
+</select></label>
 </div>
 <div id="unit-chips-wrap">
 <h3>Convert these units</h3>
@@ -57,10 +63,22 @@
 <div class="result-bar">
 <div id="stats"></div>
 <div class="result-actions">
-<button id="copy-sel-btn" class="ghost">Copy selected columns</button>
-<button id="copy-all-btn" class="ghost">Copy all TSV</button>
+<button id="copy-btn" class="ghost">Copy TSV</button>
 <button id="download-btn" class="primary">Download .xlsx</button>
 </div>
+</div>
+<div class="export-bar">
+<div class="export-group"><span class="export-label">Columns</span>
+<button class="pill" data-cols="all">All</button><button class="pill" data-cols="orig">Original</button><button class="pill" data-cols="new">New only</button><button class="pill" data-cols="none">None</button></div>
+<div class="export-group"><span class="export-label">Rows</span>
+<select id="row-filter" aria-label="Rows to include">
+<option value="all">All rows</option>
+<option value="converted">Converted only</option>
+<option value="unchanged">Unchanged only</option>
+<option value="priced">Has a price</option>
+<option value="stocked">Has stock (qty &gt; 0)</option>
+</select></div>
+<span id="export-summary"></span>
 </div>
 <div id="table-wrap"><table id="result-table"></table></div>
 </section>
