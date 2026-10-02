@@ -49,10 +49,65 @@ monitor: '<rect x="3" y="4.5" width="18" height="12" rx="2.5"/><path d="M9 20h6M
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
 
+const TRANSIENT = ['is-open', 'flash', 'over', 'dragging', 'editing'];
+const keyOf = n => n.nodeType !== 1 ? null : n.getAttribute('data-key') || n.id || null;
+const sigOf = n => n.nodeType !== 1 ? '#' + n.nodeType : n.nodeName + '.' + (n.getAttribute('class') || '').trim().split(/\s+/)[0];
+function syncAttrs(a, b, merge) {
+const keep = TRANSIENT.filter(c => a.classList.contains(c));
+if (!merge) for (const at of [...a.attributes]) if (!b.hasAttribute(at.name) && at.name !== 'data-own') a.removeAttribute(at.name);
+for (const at of b.attributes) {
+if (merge && at.name === 'class') { at.value.split(/\s+/).filter(Boolean).forEach(c => a.classList.add(c)); continue; }
+if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+}
+keep.forEach(c => a.classList.add(c));
+}
+function morphNode(a, b) {
+if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+const own = a.hasAttribute('data-own'), tag = a.nodeName;
+if (tag === 'INPUT' || tag === 'TEXTAREA') {
+const before = tag === 'TEXTAREA' ? a.defaultValue : a.getAttribute('value');
+syncAttrs(a, b, own);
+const next = (tag === 'TEXTAREA' ? b.textContent : b.getAttribute('value')) ?? '';
+if ((before ?? '') !== next) { if (tag === 'TEXTAREA') a.defaultValue = next; if (document.activeElement !== a) a.value = next; }
+return;
+}
+syncAttrs(a, b, own);
+if (!own) morphKids(a, b);
+}
+function morphKids(from, to) {
+const keyed = new Map();
+for (let c = from.firstChild; c; c = c.nextSibling) { const k = keyOf(c); if (k) keyed.set(k, c); }
+let cur = from.firstChild;
+for (const n of [...to.childNodes]) {
+const k = keyOf(n);
+let m = null;
+if (k) { m = keyed.get(k) || null; if (m && m.nodeName !== n.nodeName) m = null; if (m) keyed.delete(k); }
+else if (cur && !keyOf(cur) && sigOf(cur) === sigOf(n)) m = cur;
+if (m) { if (m === cur) cur = cur.nextSibling; else from.insertBefore(m, cur); morphNode(m, n); }
+else from.insertBefore(n, cur);
+}
+while (cur) { const nx = cur.nextSibling; from.removeChild(cur); cur = nx; }
+}
+function morph(target, html) {
+const tpl = document.createElement('template');
+tpl.innerHTML = html;
+morphKids(target, tpl.content);
+return target;
+}
+function own(el) { if (!el.hasAttribute('data-own')) el.setAttribute('data-own', ''); return el; }
+function flash(el) {
+if (!el) return;
+el.classList.remove('flash');
+void el.offsetWidth;
+el.classList.add('flash');
+el.addEventListener('animationend', () => el.classList.remove('flash'), {once: true});
+}
+
 let toastTimer;
 function toast(msg, opts = {}) {
 const t = $('#toast');
-t.innerHTML = `<span class="toast-ic ${opts.tone || ''}">${icon(opts.icon || 'check')}</span><span class="toast-msg">${esc(msg)}</span>` + (opts.action ? `<button class="toast-act">${esc(opts.action.label)}</button>` : '');
+morph(t, `<span class="toast-ic ${opts.tone || ''}">${icon(opts.icon || 'check')}</span><span class="toast-msg">${esc(msg)}</span>` + (opts.action ? `<button class="toast-act">${esc(opts.action.label)}</button>` : ''));
+if (t.classList.contains('show')) { t.classList.remove('bump'); void t.offsetWidth; t.classList.add('bump'); }
 t.classList.add('show');
 if (opts.action) $('.toast-act', t).onclick = () => { opts.action.run(); t.classList.remove('show'); };
 clearTimeout(toastTimer);
@@ -123,25 +178,27 @@ it.run && it.run();
 
 function select(el, {options, value, onChange, placeholder}) {
 const cur = options.find(o => String(o.value) === String(value));
-el.classList.add('sel');
+own(el).classList.add('sel');
 el.type = 'button';
-el.innerHTML = `<span class="sel-val">${cur ? esc(cur.label) : `<em>${esc(placeholder || 'Choose')}</em>`}</span>${icon('chevron', 'sel-chev')}`;
+morph(el, `<span class="sel-val">${cur ? esc(cur.label) : `<em>${esc(placeholder || 'Choose')}</em>`}</span>${icon('chevron', 'sel-chev')}`);
 el.onclick = () => menu(el, options.map(o => o.head ? o : {label: o.label, hint: o.hint, icon: o.icon, active: String(o.value) === String(value), run: () => onChange(o.value)}), {cls: 'pop-sel'});
 }
 
 function seg(el, {options, value, onChange}) {
-el.classList.add('seg');
-el.innerHTML = options.map(o => `<button type="button" class="seg-b ${String(o.value) === String(value) ? 'on' : ''}" data-v="${esc(o.value)}" ${o.title ? `title="${esc(o.title)}"` : ''}>${o.icon ? icon(o.icon) : ''}<span>${esc(o.label)}</span>${o.count != null ? `<b>${o.count}</b>` : ''}</button>`).join('');
-el.onclick = e => { const b = e.target.closest('.seg-b'); if (!b || b.classList.contains('on')) return; const o = options.find(x => String(x.value) === b.dataset.v); $$('.seg-b', el).forEach(x => x.classList.toggle('on', x === b)); onChange(o.value); };
+own(el).classList.add('seg');
+el.setAttribute('role', 'radiogroup');
+morph(el, options.map(o => { const on = String(o.value) === String(value); return `<button type="button" class="seg-b ${on ? 'on' : ''}" role="radio" aria-checked="${on}" data-key="v-${esc(o.value)}" data-v="${esc(o.value)}" ${o.title ? `title="${esc(o.title)}"` : ''}>${o.icon ? icon(o.icon) : ''}<span>${esc(o.label)}</span>${o.count != null ? `<b>${o.count}</b>` : ''}</button>`; }).join(''));
+el.onclick = e => { const b = e.target.closest('.seg-b'); if (!b || b.classList.contains('on')) return; const o = options.find(x => String(x.value) === b.dataset.v); $$('.seg-b', el).forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); }); onChange(o.value); };
 }
 
 function sw(on, attrs = '') { return `<button type="button" class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${on}" ${attrs}><span></span></button>`; }
 
 function stepper(el, {value, min = 0, max = 9999, step = 1, onChange, suffix = ''}) {
-el.classList.add('stepper');
-el.innerHTML = `<button type="button" class="st-b" data-d="-1" aria-label="Decrease">${icon('minus')}</button><input type="text" inputmode="decimal" value="${esc(value)}" aria-label="Value"><span class="st-suf">${esc(suffix)}</span><button type="button" class="st-b" data-d="1" aria-label="Increase">${icon('plus')}</button>`;
+own(el).classList.add('stepper');
+morph(el, `<button type="button" class="st-b" data-key="dec" data-d="-1" aria-label="Decrease" ${value <= min ? 'disabled' : ''}>${icon('minus')}</button><input type="text" data-key="in" inputmode="decimal" value="${esc(value)}" aria-label="Value"><span class="st-suf" data-key="suf">${esc(suffix)}</span><button type="button" class="st-b" data-key="inc" data-d="1" aria-label="Increase" ${value >= max ? 'disabled' : ''}>${icon('plus')}</button>`);
 const inp = $('input', el);
-const set = v => { v = Math.min(max, Math.max(min, v)); v = +(+v).toFixed(6); inp.value = v; if (v !== value) { value = v; onChange(v); } };
+if (document.activeElement !== inp && inp.value !== String(value)) inp.value = value;
+const set = v => { v = Math.min(max, Math.max(min, v)); v = +(+v).toFixed(6); inp.value = v; $$('.st-b', el).forEach(b => b.disabled = +b.dataset.d < 0 ? v <= min : v >= max); if (v !== value) { value = v; onChange(v); } };
 el.onclick = e => { const b = e.target.closest('.st-b'); if (b) set((Engine.parseNum(inp.value) ?? value) + step * +b.dataset.d); };
 inp.onchange = () => { const n = Engine.parseNum(inp.value); n == null ? inp.value = value : set(n); };
 inp.onkeydown = e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'ArrowUp') { e.preventDefault(); set(value + step); } if (e.key === 'ArrowDown') { e.preventDefault(); set(value - step); } };
@@ -156,8 +213,13 @@ m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labe
 document.body.appendChild(m);
 void m.offsetWidth;
 m.classList.add('open');
-const done = v => { m.classList.remove('open'); setTimeout(() => m.remove(), 160); document.removeEventListener('keydown', key, true); res(v); };
-const key = e => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } if (e.key === 'Enter') { e.preventDefault(); done(true); } };
+let closed = false;
+const done = v => { if (closed) return; closed = true; m.classList.remove('open'); setTimeout(() => m.remove(), 160); document.removeEventListener('keydown', key, true); res(v); };
+const key = e => {
+if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); const f = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-r]'); done(f ? f.dataset.r === '1' : true); }
+else if (e.key === 'Tab') { const bs = $$('[data-r]', m), i = bs.indexOf(document.activeElement); e.preventDefault(); bs[(i + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus(); }
+};
 document.addEventListener('keydown', key, true);
 m.onclick = e => { if (e.target === m) done(false); const b = e.target.closest('[data-r]'); if (b) done(b.dataset.r === '1'); };
 setTimeout(() => $('[data-r="1"]', m).focus(), 40);
@@ -170,5 +232,5 @@ if (typeof v !== 'number') return String(v);
 return v.toLocaleString('en-US', {maximumFractionDigits: d});
 };
 
-return {$, $$, esc, icon, toast, popover, closePop, closeTop, menu, select, seg, sw, stepper, confirm, fmt, pops};
+return {$, $$, esc, icon, toast, popover, closePop, closeTop, menu, select, seg, sw, stepper, confirm, fmt, pops, morph, own, flash};
 })();

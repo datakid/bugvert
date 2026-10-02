@@ -146,7 +146,7 @@ dir: st.S.autoDir ? dd.dir : 'toBase', dirAuto: dd, dirTouched: false,
 fam: {}, rows: {}, groups: {}, columns: [], colsTouched: false
 };
 st.doc.columns = buildColumns();
-st.view = {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null};
+st.view = blankView();
 st.sel.clear(); st.expanded.clear();
 st.undo = []; st.redo = [];
 learn();
@@ -176,26 +176,35 @@ const prev = st.doc; st.doc = d;
 try { return buildColumns(); } finally { st.doc = prev; }
 }
 
-let pt;
-function persistSoon() {
-clearTimeout(pt);
-pt = setTimeout(() => {
-if (!st.src) { localStorage.removeItem(K.SES); return; }
-const ok = save(K.SES, {src: st.src, doc: st.doc, ts: Date.now()});
-if (!ok) localStorage.removeItem(K.SES);
-}, 500);
+const blankView = () => ({quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null});
+let pt = 0, dirty = false;
+function persistNow() {
+clearTimeout(pt); pt = 0;
+if (!dirty) return;
+dirty = false;
+if (!st.src) { try { localStorage.removeItem(K.SES); } catch {} return; }
+if (!save(K.SES, {src: st.src, doc: st.doc, view: st.view, ts: Date.now()})) try { localStorage.removeItem(K.SES); } catch {}
 }
-function savedSession() { const s = load(K.SES, null); return s && s.src && s.doc && s.doc.v === 2 ? s : null; }
-function resume() {
+function persistSoon() { dirty = true; clearTimeout(pt); pt = setTimeout(persistNow, 400); }
+addEventListener('pagehide', persistNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistNow(); });
+function savedSession() {
+const s = load(K.SES, null);
+return s && s.src && Array.isArray(s.src.rows) && Array.isArray(s.src.headers) && s.doc && s.doc.v === 2 && s.doc.roles && Array.isArray(s.doc.columns) ? s : null;
+}
+function resume(quiet) {
 const s = savedSession(); if (!s) return false;
-st.src = s.src; st.doc = s.doc;
-st.det = {roles: s.doc.roles, cols: s.doc.kinds.map((k, i) => ({i, kind: k}))};
+st.src = s.src; st.doc = Object.assign({fam: {}, rows: {}, groups: {}, ignored: [], kinds: [], conf: [], reasons: []}, s.doc);
+st.det = {roles: {...st.doc.roles}, cols: st.doc.kinds.map((k, i) => ({i, kind: k}))};
 st.undo = []; st.redo = []; st.sel.clear(); st.expanded.clear();
-st.view = {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null};
+st.view = Object.assign(blankView(), s.view && typeof s.view === 'object' ? s.view : {});
+if (!Array.isArray(st.view.rules)) st.view.rules = [];
+if (quiet) { st.ver++; return true; }
 emit('open');
 return true;
 }
-function close() { st.src = null; st.doc = null; st.det = null; st.sel.clear(); st.undo = []; st.redo = []; localStorage.removeItem(K.SES); emit('close'); }
+function close() { st.src = null; st.doc = null; st.det = null; st.wb = null; st.sel.clear(); st.expanded.clear(); st.undo = []; st.redo = []; st.view = blankView(); try { localStorage.removeItem(K.SES); } catch {} emit('close'); }
 
-return {st, DEFAULTS, res, fresh, emit, on, commit, undo, redo, setS, resetS, resetDet, learn, remember, clearMem, saveLayout, buildColumns, open, setRole, savedSession, resume, close, clone};
+function setView(patch) { st.view = Object.assign(blankView(), patch || {}); persistSoon(); }
+return {st, DEFAULTS, res, fresh, emit, on, commit, undo, redo, setS, resetS, resetDet, learn, remember, clearMem, saveLayout, buildColumns, open, setRole, savedSession, resume, close, clone, blankView, setView, persistSoon};
 })();

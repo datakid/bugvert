@@ -1,7 +1,7 @@
 (() => {
-const {$, $$, esc, icon, toast, menu, popover, closePop, select, stepper, confirm, fmt} = UI;
+const {$, $$, esc, icon, toast, menu, popover, closePop, select, stepper, confirm, fmt, morph} = UI;
 const E = Engine, ST = Store, st = Store.st, A = App;
-const V = {rows: [], cols: [], widths: new Map(), active: null, edit: null, showOld: true, last: null, main: null, raf: 0};
+const V = {rows: [], cols: [], widths: new Map(), active: null, edit: null, showOld: true, last: null, main: null, raf: 0, src: null};
 const QUICK = [
 {v: 'all', l: 'All rows'}, {v: 'issues', l: 'Needs a look', tone: 'warn'}, {v: 'converted', l: 'Converted'},
 {v: 'kept', l: 'Unchanged'}, {v: 'custom', l: 'Edited'}, {v: 'dups', l: 'Duplicates'}, {v: 'excluded', l: 'Excluded'}
@@ -31,9 +31,9 @@ w = Math.max(110, Math.min(280, Math.max((n ? tot / n : 6) * 7.6, m.label.length
 V.widths.set(key, Math.round(w));
 return V.widths.get(key);
 }
-ST.on(w => { if (w === 'open') V.widths.clear(); });
 
 function computeRows() {
+if (V.src !== st.src) { V.widths.clear(); V.src = st.src; V.active = null; V.last = null; }
 const r = ST.res();
 const cols = A.visibleCols();
 V.cols = cols.map(c => ({...c, m: A.colMeta(c.key), label: A.colLabel(c)}));
@@ -75,14 +75,23 @@ main.innerHTML = `
 <div class="bulk" id="bulk" aria-live="polite"></div>
 </section>`;
 const sc = $('#grid-scroll', main);
-sc.addEventListener('scroll', () => { cancelAnimationFrame(V.raf); V.raf = requestAnimationFrame(paintRows); }, {passive: true});
+sc.addEventListener('scroll', () => { if (V.raf) return; V.raf = requestAnimationFrame(() => { V.raf = 0; paintRows(); }); }, {passive: true});
 let t;
 $('#sheet-search', main).oninput = e => { clearTimeout(t); $('#search-x', main).classList.toggle('hidden', !e.target.value); t = setTimeout(() => { st.view.search = e.target.value; refresh(true); }, 140); };
+$('#sheet-search', main).onkeydown = e => { if (e.key === 'Escape' && e.target.value) { e.preventDefault(); $('#search-x', main).click(); } };
+$('#quick', main).onclick = e => { const b = e.target.closest('.qchip'); if (!b || b.dataset.q === st.view.quick && !st.view.flag) return; st.view.quick = b.dataset.q; st.view.flag = null; refresh(true); };
+$('#sub-bar', main).onclick = e => {
+const f = e.target.closest('[data-flag]'); if (f) { st.view.flag = st.view.flag === f.dataset.flag ? null : f.dataset.flag; return refresh(true); }
+const ru = e.target.closest('[data-rule]'); if (ru) { st.view.rules.splice(+ru.dataset.rule, 1); return refresh(true); }
+const c = e.target.closest('[data-clr]'); if (c) { st.view[c.dataset.clr] = null; refresh(true); }
+};
+$('#bulk', main).onclick = bulkClick;
+$('#grid-empty', main).onclick = e => { if (e.target.closest('#empty-clear')) clearView(); };
 $('#search-x', main).onclick = () => { $('#sheet-search', main).value = ''; st.view.search = ''; $('#search-x', main).classList.add('hidden'); refresh(true); };
 $('#old-toggle', main).onclick = e => { V.showOld = !V.showOld; e.currentTarget.classList.toggle('on', V.showOld); e.currentTarget.innerHTML = icon(V.showOld ? 'eye' : 'eyeOff'); paintRows(true); };
 $('#sheet-more', main).onclick = e => menu(e.currentTarget, [
 {head: 'Sheet'},
-{label: 'Compact rows', icon: 'layers', active: st.S.density === 'compact', run: () => { ST.setS({density: st.S.density === 'compact' ? 'comfy' : 'compact'}); document.body.dataset.density = st.S.density; refresh(); }},
+{label: 'Compact rows', icon: 'layers', active: st.S.density === 'compact', run: () => ST.setS({density: st.S.density === 'compact' ? 'comfy' : 'compact'})},
 {label: 'Expand all merged', icon: 'chevron', run: () => { ST.res().items.forEach(i => i.kind === 'merged' && st.expanded.add(i.id)); refresh(); }},
 {label: 'Collapse all merged', icon: 'right', run: () => { st.expanded.clear(); refresh(); }},
 '-',
@@ -100,7 +109,8 @@ update() { if (V.edit) cancelEdit(); refresh(); }
 function clearView() { st.view.rules = []; st.view.sort = null; st.view.family = null; st.view.flag = null; st.view.tsrc = null; st.view.conf = null; st.view.search = ''; const s = $('#sheet-search', V.main); if (s) s.value = ''; refresh(true); }
 
 function refresh(resetScroll) {
-if (!V.main || !$('#grid', V.main)) return;
+if (!V.main || !V.main.isConnected || !$('#grid', V.main)) return;
+ST.persistSoon();
 computeRows();
 quickBar();
 subBar();
@@ -116,8 +126,7 @@ function quickBar() {
 const r = ST.res();
 const counts = {};
 QUICK.forEach(q => counts[q.v] = E.viewItems(r, {quick: q.v}, [], st.S).length);
-$('#quick', V.main).innerHTML = QUICK.filter(q => q.v === 'all' || counts[q.v] || st.view.quick === q.v).map(q => `<button class="qchip ${st.view.quick === q.v ? 'on' : ''} ${q.tone || ''}" data-q="${q.v}" role="tab" aria-selected="${st.view.quick === q.v}">${q.l}<b>${counts[q.v]}</b></button>`).join('');
-$$('.qchip', V.main).forEach(b => b.onclick = () => { st.view.quick = b.dataset.q; st.view.flag = null; refresh(true); });
+morph($('#quick', V.main), QUICK.filter(q => q.v === 'all' || counts[q.v] || st.view.quick === q.v).map(q => `<button class="qchip ${st.view.quick === q.v ? 'on' : ''} ${q.tone || ''}" data-key="q-${q.v}" data-q="${q.v}" role="tab" aria-selected="${st.view.quick === q.v}">${q.l}<b>${counts[q.v]}</b></button>`).join(''));
 }
 
 function subBar() {
@@ -127,12 +136,12 @@ if (st.view.quick === 'issues') {
 const fl = ['nameConflict', 'noSize', 'nameMulti', 'noPrice', 'badUnit', 'unknownUnit', 'noUnit', 'partial', 'review'];
 const c = {};
 r.items.forEach(it => { if (!it.excluded) it.flags.forEach(f => { if (fl.includes(f)) c[f] = (c[f] || 0) + 1; }); });
-fl.filter(f => c[f]).forEach(f => chips.push(`<button class="fchip ${st.view.flag === f ? 'on' : ''}" data-flag="${f}">${A.FLAG[f]}<b>${c[f]}</b></button>`));
+fl.filter(f => c[f]).forEach(f => chips.push(`<button class="fchip ${st.view.flag === f ? 'on' : ''}" data-key="f-${f}" data-flag="${f}" aria-pressed="${st.view.flag === f}">${A.FLAG[f]}<b>${c[f]}</b></button>`));
 }
-if (st.view.flag && st.view.quick !== 'issues') chips.push(`<span class="rule-chip">${icon('info')}${esc(A.FLAG[st.view.flag] || st.view.flag)}<button data-clr="flag" aria-label="Remove">${icon('x')}</button></span>`);
-if (st.view.tsrc) chips.push(`<span class="rule-chip">${icon('units')}Rule: ${esc(A.TSRC[st.view.tsrc] || st.view.tsrc)}<button data-clr="tsrc" aria-label="Remove">${icon('x')}</button></span>`);
-if (st.view.conf) chips.push(`<span class="rule-chip">${icon('spark')}Confidence: ${esc(st.view.conf)}<button data-clr="conf" aria-label="Remove">${icon('x')}</button></span>`);
-if (st.view.family) chips.push(`<span class="rule-chip">${icon('units')}Unit: ${esc(E.famTitle(st.view.family, r.fams[st.view.family]))}<button data-clr="family" aria-label="Remove">${icon('x')}</button></span>`);
+if (st.view.flag && st.view.quick !== 'issues') chips.push(`<span class="rule-chip" data-key="c-flag">${icon('info')}${esc(A.FLAG[st.view.flag] || st.view.flag)}<button data-clr="flag" aria-label="Remove">${icon('x')}</button></span>`);
+if (st.view.tsrc) chips.push(`<span class="rule-chip" data-key="c-tsrc">${icon('units')}Rule: ${esc(A.TSRC[st.view.tsrc] || st.view.tsrc)}<button data-clr="tsrc" aria-label="Remove">${icon('x')}</button></span>`);
+if (st.view.conf) chips.push(`<span class="rule-chip" data-key="c-conf">${icon('spark')}Confidence: ${esc(st.view.conf)}<button data-clr="conf" aria-label="Remove">${icon('x')}</button></span>`);
+if (st.view.family) chips.push(`<span class="rule-chip" data-key="c-family">${icon('units')}Unit: ${esc(E.famTitle(st.view.family, r.fams[st.view.family]))}<button data-clr="family" aria-label="Remove">${icon('x')}</button></span>`);
 st.view.rules.forEach((ru, i) => {
 const lbl = V.cols.find(c => c.key === ru.key)?.label || A.colMeta(ru.key).label;
 const val = ru.op === 'in' || ru.op === 'nin' ? (ru.val.length > 2 ? ru.val.length + ' values' : ru.val.map(v => v === '' ? '(empty)' : v).join(', ')) : NEEDS_VAL.has(ru.op) ? ru.val : '';
@@ -140,17 +149,12 @@ chips.push(`<span class="rule-chip">${icon('filter')}<b>${esc(lbl)}</b> ${esc(OP
 });
 if (st.view.sort) {
 const lbl = A.colMeta(st.view.sort.key).label;
-chips.push(`<span class="rule-chip">${icon(st.view.sort.dir === 'asc' ? 'sortUp' : 'sortDown')}${esc(lbl)}<button data-clr="sort" aria-label="Remove sort">${icon('x')}</button></span>`);
+chips.push(`<span class="rule-chip" data-key="c-sort">${icon(st.view.sort.dir === 'asc' ? 'sortUp' : 'sortDown')}${esc(lbl)}<button data-clr="sort" aria-label="Remove sort">${icon('x')}</button></span>`);
 }
 const shown = V.rows.filter(x => !x.member).length;
 const sb = $('#sub-bar', V.main);
-sb.innerHTML = chips.join('') + `<span class="sb-count">${shown} of ${r.stats.rows + r.stats.excluded} rows</span>`;
+morph(sb, chips.join('') + `<span class="sb-count" data-key="count">${shown} of ${r.stats.rows + r.stats.excluded} rows</span>`);
 sb.classList.toggle('has', chips.length > 0);
-sb.onclick = e => {
-const f = e.target.closest('[data-flag]'); if (f) { st.view.flag = st.view.flag === f.dataset.flag ? null : f.dataset.flag; return refresh(true); }
-const ru = e.target.closest('[data-rule]'); if (ru) { st.view.rules.splice(+ru.dataset.rule, 1); return refresh(true); }
-const c = e.target.closest('[data-clr]'); if (c) { st.view[c.dataset.clr] = null; refresh(true); }
-};
 }
 
 function paintHead() {
@@ -160,11 +164,11 @@ const selN = viewIds.filter(id => st.sel.has(id)).length;
 const all = viewIds.length && selN === viewIds.length;
 h.style.gridTemplateColumns = template();
 h.style.width = totalW() + 'px';
-h.innerHTML = `<div class="gh cb"><button class="ck ${all ? 'on' : selN ? 'mixed' : ''}" data-act="all" aria-label="Select all shown">${icon(selN && !all ? 'minus' : 'check')}</button></div><div class="gh st"></div>` + V.cols.map(c => {
+morph(h, `<div class="gh cb" data-key="cb"><button class="ck ${all ? 'on' : selN ? 'mixed' : ''}" data-act="all" aria-label="Select all shown">${icon(selN && !all ? 'minus' : 'check')}</button></div><div class="gh st" data-key="st"></div>` + V.cols.map(c => {
 const sorted = st.view.sort && st.view.sort.key === c.key;
 const filt = st.view.rules.some(r => r.key === c.key);
-return `<button class="gh col ${c.m.isNew ? 'new' : ''} ${c.m.num ? 'num' : ''} ${filt ? 'filtered' : ''}" data-k="${esc(c.key)}">${c.m.role ? `<i class="role-dot r-${c.m.role}" title="${A.ROLES[c.m.role].label}"></i>` : c.m.isNew ? '<i class="new-dot"></i>' : ''}<span class="gh-l">${esc(c.label)}</span>${sorted ? icon(st.view.sort.dir === 'asc' ? 'sortUp' : 'sortDown', 'gh-sort') : ''}${filt ? icon('filter', 'gh-filt') : ''}${icon('chevron', 'gh-chev')}</button>`;
-}).join('') + `<div class="gh more"><button class="icon-btn" data-act="cols" title="Columns">${icon('columns')}</button></div>`;
+return `<button class="gh col ${c.m.isNew ? 'new' : ''} ${c.m.num ? 'num' : ''} ${filt ? 'filtered' : ''}" data-key="h-${esc(c.key)}" data-k="${esc(c.key)}">${c.m.role ? `<i class="role-dot r-${c.m.role}" title="${A.ROLES[c.m.role].label}"></i>` : c.m.isNew ? '<i class="new-dot"></i>' : ''}<span class="gh-l">${esc(c.label)}</span>${sorted ? icon(st.view.sort.dir === 'asc' ? 'sortUp' : 'sortDown', 'gh-sort') : ''}${filt ? icon('filter', 'gh-filt') : ''}${icon('chevron', 'gh-chev')}</button>`;
+}).join('') + `<div class="gh more" data-key="more"><button class="icon-btn" data-act="cols" title="Columns" aria-label="Edit columns">${icon('columns')}</button></div>`);
 }
 
 function headClick(e) {
@@ -190,18 +194,19 @@ body.style.width = totalW() + 'px';
 const empty = $('#grid-empty', V.main);
 empty.classList.toggle('hidden', n > 0);
 const anyF = st.view.rules.length || st.view.search || st.view.family || st.view.flag || st.view.tsrc || st.view.conf;
-if (!n) empty.innerHTML = `<div>${icon('search')}<b>No rows here</b><span>${anyF ? 'Try clearing some filters.' : 'Nothing matches this view.'}</span>${anyF ? '<button class="btn ghost" id="empty-clear">Clear filters</button>' : ''}</div>`;
-const ec = $('#empty-clear', V.main); if (ec) ec.onclick = clearView;
+if (!n && force) morph(empty, `<div>${icon('search')}<b>No rows here</b><span>${anyF ? 'Try clearing some filters.' : 'Nothing matches this view.'}</span>${anyF ? '<button class="btn ghost" id="empty-clear">Clear filters</button>' : ''}</div>`);
 const top = sc.scrollTop - 36, vh = sc.clientHeight;
 const from = Math.max(0, Math.floor(top / h) - 8), to = Math.min(n, Math.ceil((top + vh) / h) + 8);
-const key = from + ':' + to;
+const key = from + ':' + to + ':' + h;
 if (!force && body.dataset.range === key) return;
 body.dataset.range = key;
+if (V.edit) { const ei = V.rows.findIndex(r => rowKey(r) === V.edit.rk); if (ei < from || ei >= to) V.edit.finish(true); }
 const tpl = template();
 let html = '';
 for (let i = from; i < to; i++) html += rowHTML(V.rows[i], i, h, tpl);
-body.innerHTML = html;
+morph(body, html);
 }
+const rowKey = row => row.member ? row.parent.id + '>' + row.it.id : row.it.id;
 
 function stateOf(it) {
 if (it.excluded) return 'ex';
@@ -222,7 +227,7 @@ let stc;
 if (it.kind === 'merged') stc = `<button class="mg-badge" data-act="expand" title="${it.members.length} rows merged, click to ${st.expanded.has(it.id) ? 'collapse' : 'expand'}">${icon('chevron')}${it.members.length}</button>`;
 else stc = `<button class="sdot" data-act="inspect" title="${esc(tip)}" aria-label="Row details"><i></i></button>`;
 const cells = V.cols.map(c => cellHTML(it, c, row)).join('');
-return `<div class="${cls}" style="top:${i * h}px;height:${h}px;grid-template-columns:${tpl}" data-id="${esc(it.id)}" data-i="${i}" ${row.member ? `data-parent="${esc(row.parent.id)}"` : ''}>
+return `<div class="${cls}" style="top:${i * h}px;height:${h}px;grid-template-columns:${tpl}" data-key="${esc(rowKey(row))}" data-id="${esc(it.id)}" data-i="${i}" ${row.member ? `data-parent="${esc(row.parent.id)}"` : ''}>
 <div class="gc cb">${row.member ? '<span class="tree"></span>' : `<button class="ck ${sel ? 'on' : ''}" data-act="sel" aria-label="Select row">${icon('check')}</button>`}</div>
 <div class="gc st">${stc}</div>${cells}
 <div class="gc more"><button class="icon-btn" data-act="more" aria-label="Row actions">${icon('more')}</button></div></div>`;
@@ -299,15 +304,15 @@ paintHead(); paintRows(true); bulkBar();
 function setActive(id, key, parent) {
 V.active = {id, key, parent: parent || null};
 $$('.gc.act', V.main).forEach(x => x.classList.remove('act'));
-const gr = $$('.gr', V.main).find(g => g.dataset.id === id);
+const gr = $$('.gr', V.main).find(g => g.dataset.id === id && (g.dataset.parent || null) === (parent || null));
 const c = gr && $$('.gc[data-k]', gr).find(x => x.dataset.k === key);
 if (c) c.classList.add('act');
 $('#grid-scroll', V.main).focus({preventScroll: true});
 }
 
 function keyNav(e) {
-if (V.edit || !V.active || e.target.closest('input')) return;
-const ri = V.rows.findIndex(r => r.it.id === V.active.id);
+if (V.edit || !V.active || (e.target.closest && e.target.closest('input'))) return;
+const ri = V.rows.findIndex(r => r.it.id === V.active.id && (r.member ? r.parent.id : null) === (V.active.parent || null));
 const ci = V.cols.findIndex(c => c.key === V.active.key);
 if (ri < 0 || ci < 0) return;
 const move = (dr, dc) => {
@@ -342,7 +347,7 @@ else if (left + w > sc.scrollLeft + sc.clientWidth - 52) sc.scrollLeft = left + 
 
 function activeCellEl() {
 if (!V.active) return null;
-const gr = $$('.gr', V.main).find(g => g.dataset.id === V.active.id);
+const gr = $$('.gr', V.main).find(g => g.dataset.id === V.active.id && (g.dataset.parent || null) === (V.active.parent || null));
 return gr && $$('.gc[data-k]', gr).find(x => x.dataset.k === V.active.key);
 }
 
@@ -360,16 +365,19 @@ const inp = document.createElement('input');
 inp.className = 'cell-edit' + (A.colMeta(key).num ? ' num' : '');
 inp.value = initial != null ? initial : cur == null ? '' : String(cur);
 cell.classList.add('editing');
+cell.setAttribute('data-own', '');
 cell.appendChild(inp);
-inp.focus();
+inp.focus({preventScroll: true});
 if (initial == null) inp.select();
-V.edit = {inp, it, key};
+const gr = cell.closest('.gr');
+V.edit = {inp, it, key, rk: gr ? gr.dataset.key : null};
 let done = false;
 const finish = (save, dr) => {
 if (done) return; done = true;
 const val = inp.value;
 V.edit = null;
 cell.classList.remove('editing');
+cell.removeAttribute('data-own');
 inp.remove();
 if (save) applyEdit(it, key, val, cur);
 $('#grid-scroll', V.main).focus({preventScroll: true});
@@ -548,12 +556,13 @@ toast('Taken out of the merge', {icon: 'split', action: {label: 'Undo', run: () 
 
 function setExcluded(items, ex) {
 const rows = rowsOf(items);
+if (!rows.length) return;
+items.forEach(i => st.sel.delete(i.id));
 ST.commit(ex ? 'Exclude rows' : 'Include rows', d => rows.forEach(it => {
 const r = d.rows[it.rid] ||= {};
 if (ex) r.ex = true; else if (it.flags.includes('junk')) r.ex = false; else delete r.ex;
 tidy(d, it.rid);
 }));
-items.forEach(i => st.sel.delete(i.id));
 toast(`${rows.length} row${rows.length > 1 ? 's' : ''} ${ex ? 'excluded' : 'included'}`, {icon: ex ? 'eyeOff' : 'eye', action: {label: 'Undo', run: () => ST.undo()}});
 }
 
@@ -581,8 +590,8 @@ if (rows.length < 2) return toast('Pick at least two rows to merge', {tone: 'war
 const units = new Set(rows.map(x => E.nameKey(x.newUnit, true)));
 if (units.size > 1 && !await confirm({title: 'Merge different units?', body: `These rows end up in ${units.size} different units. The merged row uses “${rows[0].newUnit}” and adds the quantities together as they are.`, ok: 'Merge anyway'})) return;
 const id = Date.now().toString(36);
-ST.commit('Merge selected', d => rows.forEach(it => { const r = d.rows[it.rid] ||= {}; r.mg = id; delete r.solo; }));
 st.sel.clear();
+ST.commit('Merge selected', d => rows.forEach(it => { const r = d.rows[it.rid] ||= {}; r.mg = id; delete r.solo; }));
 toast(`${rows.length} rows merged into one`, {icon: 'merge', action: {label: 'Undo', run: () => ST.undo()}});
 }
 
@@ -594,16 +603,18 @@ document.body.classList.toggle('bulk-on', items.length > 0);
 if (!items.length) { b.classList.remove('show'); return; }
 const anyEx = items.some(i => i.excluded), anyIn = items.some(i => !i.excluded);
 const anyDup = items.some(i => i.kind === 'merged' || i.group);
-b.innerHTML = `<span class="bk-n"><b>${items.length}</b> selected</span>
-<button class="bk-b" data-b="pack">${icon('units')}Pack size</button>
-<button class="bk-b" data-b="merge" ${items.length < 2 && items[0].kind !== 'merged' ? 'disabled' : ''}>${icon('merge')}Merge</button>
-${anyDup ? `<button class="bk-b" data-b="keep">${icon('split')}Keep separate</button>` : ''}
-${anyIn ? `<button class="bk-b" data-b="ex">${icon('eyeOff')}Exclude</button>` : ''}
-${anyEx ? `<button class="bk-b" data-b="in">${icon('eye')}Include</button>` : ''}
-<button class="bk-b" data-b="reset">${icon('reset')}Reset</button>
-<button class="bk-x" data-b="clear" aria-label="Clear selection">${icon('x')}</button>`;
+morph(b, `<span class="bk-n" data-key="n"><b>${items.length}</b> selected</span>
+<button class="bk-b" data-key="pack" data-b="pack">${icon('units')}Pack size</button>
+<button class="bk-b" data-key="merge" data-b="merge" ${items.length < 2 && items[0].kind !== 'merged' ? 'disabled' : ''}>${icon('merge')}Merge</button>
+${anyDup ? `<button class="bk-b" data-key="keep" data-b="keep">${icon('split')}Keep separate</button>` : ''}
+${anyIn ? `<button class="bk-b" data-key="ex" data-b="ex">${icon('eyeOff')}Exclude</button>` : ''}
+${anyEx ? `<button class="bk-b" data-key="in" data-b="in">${icon('eye')}Include</button>` : ''}
+<button class="bk-b" data-key="reset" data-b="reset">${icon('reset')}Reset</button>
+<button class="bk-x" data-key="clear" data-b="clear" aria-label="Clear selection">${icon('x')}</button>`);
 b.classList.add('show');
-b.onclick = e => {
+}
+
+function bulkClick(e) {
 const t = e.target.closest('[data-b]'); if (!t || t.disabled) return;
 const fresh = ST.res().items.filter(i => st.sel.has(i.id));
 const a = t.dataset.b;
@@ -612,18 +623,18 @@ else if (a === 'merge') mergeSelected(fresh);
 else if (a === 'keep') {
 const groups = [...new Map(fresh.filter(i => i.kind === 'merged').map(i => [i.group.key, i.group])).values()];
 const solo = fresh.filter(i => i.kind !== 'merged' && i.group);
+st.sel.clear();
 ST.commit('Keep separate', d => {
 groups.forEach(g => { if (g.manual) g.members.forEach(m => { if (d.rows[m.rid]) { delete d.rows[m.rid].mg; tidy(d, m.rid); } }); else (d.groups[g.key] ||= {}).mode = 'keep'; });
-solo.forEach(it => { const r = d.rows[it.rid] ||= {}; r.solo = true; delete r.mg; });
+solo.forEach(it => { const r = d.rows[it.rid] ||= {}; r.solo = true; delete r.mg; tidy(d, it.rid); });
 });
-st.sel.clear();
+refresh();
 toast('Kept separate', {icon: 'split', action: {label: 'Undo', run: () => ST.undo()}});
 }
 else if (a === 'ex') setExcluded(fresh.filter(i => !i.excluded), true);
 else if (a === 'in') setExcluded(fresh.filter(i => i.excluded), false);
 else if (a === 'reset') resetRows(fresh);
 else if (a === 'clear') { st.sel.clear(); paintHead(); paintRows(true); bulkBar(); }
-};
 }
 
 function colPop(anchor, key) {

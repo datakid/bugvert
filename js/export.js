@@ -4,9 +4,9 @@ const E = Engine, ST = Store, st = Store.st, A = App;
 let tab = 'data';
 const viewFiltered = () => st.view.quick !== 'all' || st.view.rules.length || st.view.search || st.view.family || st.view.flag || st.view.sort || st.view.tsrc || st.view.conf;
 
-function exportData(scope) {
-A.flushEdit && A.flushEdit();
-const r = ST.fresh();
+function exportData(scope, recompute) {
+if (recompute) A.flushEdit && A.flushEdit();
+const r = recompute ? ST.fresh() : ST.res();
 const cols = A.visibleCols();
 const items = scope === 'view' ? E.viewItems(r, st.view, cols, st.S) : r.items.filter(i => !i.excluded);
 const head = cols.map(c => A.colLabel(c));
@@ -49,7 +49,9 @@ const name = st.src.name + '-bugvert';
 const logic = Logic.logicRows(data.items, r, st.S, st.doc);
 const about = Logic.about(r, st.S, st.doc, st.src);
 const csv = st.S.fmt === 'csv';
-main.innerHTML = `
+const prevName = $('#exp-name', main);
+const typed = prevName && prevName.dataset.dirty ? prevName.value : null;
+A.paint(main, `
 <section class="exp">
 <div class="card exp-main">
 <header class="exp-h"><div class="exp-ic">${icon('export')}</div><div><h2>Export</h2><p>Exactly what the sheet shows, recalculated at the moment you export.</p></div></header>
@@ -68,17 +70,20 @@ ${csv ? '' : sw(st.S.expLogic, 'id="exp-lg" aria-label="Include logic sheets"')}
 </div>
 <div class="card exp-prev">
 <header><div id="exp-tabs"></div><button class="link" id="exp-cols">${icon('columns')}Edit columns</button></header>
-<div class="prev-wrap ${tab === 'about' ? 'about' : ''}">${tab === 'data' ? preview([data.head].concat(data.rows), 12) : tab === 'logic' ? preview(logic, 40, 'logic') : `<div class="about-wrap">${aboutHTML(about)}</div>`}</div>
+<div class="prev-wrap ${tab === 'about' ? 'about' : ''}" id="prev-wrap" data-key="pw-${tab}">${tab === 'data' ? preview([data.head].concat(data.rows), 12) : tab === 'logic' ? preview(logic, 40, 'logic') : `<div class="about-wrap">${aboutHTML(about)}</div>`}</div>
 </div>
-</section>`;
+</section>`);
+const nameIn = $('#exp-name', main);
+if (typed != null) { nameIn.value = typed; nameIn.dataset.dirty = '1'; }
+nameIn.oninput = () => { nameIn.dataset.dirty = '1'; };
 seg($('#exp-tabs', main), {value: tab, options: [{value: 'data', label: 'Data', icon: 'sheet'}, {value: 'logic', label: 'Logic', icon: 'brain', count: logic.length - 1}, {value: 'about', label: 'How it works', icon: 'info'}], onChange: v => { tab = v; this.render(main); }});
-if (viewFiltered()) seg($('#exp-scope', main), {value: st.S.scope, options: [{value: 'view', label: 'Current view', count: exportData('view').rows.length}, {value: 'all', label: 'All rows', count: exportData('all').rows.length}], onChange: v => ST.setS({scope: v})});
+if (viewFiltered()) seg($('#exp-scope', main), {value: st.S.scope, options: [{value: 'view', label: 'Current view', count: (scope === 'view' ? data : exportData('view')).rows.length}, {value: 'all', label: 'All rows', count: (scope === 'all' ? data : exportData('all')).rows.length}], onChange: v => ST.setS({scope: v})});
 seg($('#exp-fmt', main), {value: st.S.fmt, options: [{value: 'xlsx', label: 'Excel'}, {value: 'csv', label: 'CSV'}], onChange: v => ST.setS({fmt: v})});
 const lg = $('#exp-lg', main); if (lg) lg.onclick = () => ST.setS({expLogic: !st.S.expLogic});
 $('#exp-cols', main).onclick = () => A.go('columns');
 const fname = () => ($('#exp-name', main).value.trim() || name).replace(/[\\/:*?"<>|]+/g, '-');
 $('#exp-copy', main).onclick = () => {
-const d = exportData(scope);
+const d = exportData(viewFiltered() ? st.S.scope : 'all', true);
 if (tab !== 'data') {
 const g = tab === 'logic' ? Logic.logicRows(d.items, d.r, st.S, st.doc) : Logic.about(d.r, st.S, st.doc, st.src);
 return A.copyText(g.map(row => row.map(v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n'));
@@ -88,7 +93,7 @@ const cell = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
 A.copyText([d.head].concat(d.rows).map(row => row.map(cell).join('\t')).join('\n'));
 };
 $('#exp-dl', main).onclick = () => {
-const d = exportData(viewFiltered() ? st.S.scope : 'all');
+const d = exportData(viewFiltered() ? st.S.scope : 'all', true);
 if (!d.cols.length) return toast('Turn on at least one column', {tone: 'warn', icon: 'alert'});
 if (!d.rows.length) return toast('No rows to export', {tone: 'warn', icon: 'alert'});
 const wb = XLSX.utils.book_new();
@@ -103,7 +108,8 @@ else XLSX.writeFile(wb, fname() + '.xlsx');
 toast(`Exported ${d.rows.length} rows${withLogic ? ' with the logic' : ''}`, {icon: 'export'});
 };
 $('#exp-ldl', main).onclick = () => {
-const d = exportData(viewFiltered() ? st.S.scope : 'all');
+const d = exportData(viewFiltered() ? st.S.scope : 'all', true);
+if (!d.items.length) return toast('No rows to explain', {tone: 'warn', icon: 'alert'});
 const wb = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(wb, sheetOf(Logic.logicRows(d.items, d.r, st.S, st.doc), LOGIC_W), 'Logic');
 XLSX.utils.book_append_sheet(wb, sheetOf(Logic.about(d.r, st.S, st.doc, st.src), {0: 30, 1: 110}), 'How it works');

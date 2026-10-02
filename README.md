@@ -15,6 +15,14 @@ A browser app that takes a messy pharmacy or inventory sheet (xlsx, xls, ods, cs
 - Performance: parse results and name reads are cached, column detection samples large files, and per-family rules are cached. In tests, 40k rows load in about 2 s and recompute in about 0.5 s.
 - Fixed light-theme colour variables that referred to themselves (hover, selection, glass, knobs, row lines).
 
+## 2.5 polish pass
+- **No more re-render flicker.** A small keyed DOM morph (`UI.morph`) updates views in place instead of replacing `innerHTML`. Focus, caret, scroll position, open menus and in-progress typing are kept when data or settings change. Segmented controls, steppers and selects update in place. Sheet rows are keyed by row id, so scrolling and edits only patch changed cells.
+- **Reload without a flash.** The theme and a `booting` class are set before first paint, so transitions are off until the first frame. The saved session is restored on boot (file, edits and the current Sheet filters), and so is the last tab for the current browser tab (sessionStorage). Session saves flush on `pagehide` and when the tab is hidden, so nothing is lost on a fast refresh.
+- **Snappier motion.** Most transitions now take 140–200 ms. Shorter view-enter animation, faster dock glider, popovers fade and scale with no spring overshoot, faster switches and toasts, and `prefers-reduced-motion` is respected. Theme switching turns transitions off for one frame so colours change cleanly.
+- **Readable badges and tags.** New contrast tokens (`--count-bg/ink`, `--badge-bg/ink`, `*-ink` per hue) for segmented counts (e.g. "Duplicates 22"), quick-filter counts, dock badges, role tags, confidence labels, rule chips, unit pills and detection chips, in both light and dark themes. Muted text was darkened in light mode and lightened in dark mode.
+- **Settings redesign.** A sticky section nav (a left rail on desktop, scrollable pills on mobile) with scroll-spy. There are nine numbered cards, each with an icon, a title and a one-line purpose: Detection, Name patterns, Conversion, Rounding, Unit labels, Duplicates, Rows & columns, Dictionary, Appearance. Long cards have labelled subsections. Links from other tabs ("Change", "Tune") jump to and highlight the right card.
+- **Bug fixes.** Undo now works after column preset changes. Reorder arrows skip hidden or stale columns and are disabled at the ends. Bulk "Keep separate", merge and exclude no longer render twice. Removing chips from tag or dictionary lists always uses current settings. The Export file name is kept while typing during re-renders. Export counts no longer recompute three times. You are asked to confirm before replacing a file that has edits (drop, browse or sample). Drag-sort handles `pointercancel`. Stepper buttons are disabled at their limits. Modal Tab/Enter/Escape handling is fixed and modals can't close twice. Column widths reset when a new file opens. Active-cell lookup is correct inside expanded merged groups. The inline editor commits when its row scrolls out of the virtual window.
+
 ## Architecture
 ```
 source rows (never changed) + doc (your edits) + settings + pack memory
@@ -31,7 +39,7 @@ source rows (never changed) + doc (your edits) + settings + pack memory
 `index.html` (no parameters). Drop a file, paste rows, or try a sample.
 
 ## Storage
-localStorage only: `bugvert2.settings` (detection keys: `unitSource`, `nameMode`, `nameConf`, `namePats`, `nameMin`, `nameMax`, `nameMulti`, `flagConflict`, `guardWords`, `extraMeasures`, `order`, plus `expLogic`), `bugvert2.memory`, `bugvert2.session`. The old `useName:false` setting is migrated to `nameMode:'off'`.
+sessionStorage `bugvert2.tab` (last open tab for this browser tab). localStorage: `bugvert2.settings` (detection keys: `unitSource`, `nameMode`, `nameConf`, `namePats`, `nameMin`, `nameMax`, `nameMulti`, `flagConflict`, `guardWords`, `extraMeasures`, `order`, plus `expLogic`), `bugvert2.memory`, `bugvert2.session` (`src`, `doc`, `view`, `ts`). The old `useName:false` setting is migrated to `nameMode:'off'`.
 
 ## Not yet implemented
 - Choosing which sheets to merge; header synonym mapping across sheets

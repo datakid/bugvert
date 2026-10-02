@@ -1,5 +1,5 @@
 window.App = (() => {
-const {$, $$, esc, icon, toast, menu, select, seg, stepper, confirm, fmt} = UI;
+const {$, $$, esc, icon, toast, menu, select, seg, stepper, confirm, fmt, morph} = UI;
 const E = Engine, ST = Store, st = Store.st;
 const App = {tab: 'source', views: {}};
 
@@ -25,8 +25,9 @@ App.FLAG = Logic.FLAG;
 App.TSRC = Logic.TSRC;
 
 App.roleOf = i => Object.keys(st.doc.roles).find(r => st.doc.roles[r] === i) || null;
-let numMemo = new Map();
+let numMemo = new Map(), numSrc = null;
 App.numCol = i => {
+if (numSrc !== st.src) { numMemo = new Map(); numSrc = st.src; }
 if (numMemo.has(i)) return numMemo.get(i);
 let n = 0, t = 0;
 for (const r of st.src.rows) { if (E.clean(r[i]) === '') continue; t++; if (E.isNumCell(r[i])) n++; if (t > 300) break; }
@@ -42,28 +43,30 @@ return {key, label: st.S.labels[key] || key, isNew: true, num: E.NUM_NEW.has(key
 App.colLabel = c => c.label || App.colMeta(c.key).label;
 App.visibleCols = () => st.doc.columns.filter(c => c.on && (!c.key.startsWith('o:') || +c.key.slice(2) < st.src.headers.length));
 
+const TAB_KEY = 'bugvert2.tab';
+const rememberTab = () => { try { st.src ? sessionStorage.setItem(TAB_KEY, App.tab) : sessionStorage.removeItem(TAB_KEY); } catch {} };
+const validTab = id => { const t = TABS.find(x => x.id === id); return !!t && !(t.data && !st.src); };
+
 App.go = id => {
-const t = TABS.find(x => x.id === id);
-if (!t || (t.data && !st.src)) return;
-if (App.tab === id) return;
+if (!validTab(id)) return;
+if (App.tab === id) { if (App.settingsFocus || App.focusGroup) renderView(false); return; }
 UI.closePop();
 document.body.classList.remove('bulk-on');
 App.tab = id;
+rememberTab();
 renderDock();
 renderView(true);
 };
 
 function renderHeader() {
-const h = $('#app-header');
 const loaded = !!st.src;
-$('#file-slot', h).innerHTML = loaded ? `<button class="file-chip" id="file-chip" title="Source">${icon('file')}<span class="fc-name">${esc(st.src.name)}</span><span class="fc-meta">${st.src.rows.length} rows</span></button>` : '';
-const ds = $('#dir-slot', h);
-ds.innerHTML = '';
+morph($('#file-slot'), loaded ? `<button class="file-chip" id="file-chip" title="Back to Source">${icon('file')}<span class="fc-name">${esc(st.src.name)}</span><span class="fc-meta">${st.src.rows.length} rows</span></button>` : '');
+const ds = $('#dir-slot');
 if (loaded) {
-const d = document.createElement('div'); d.id = 'dir-seg';
-ds.appendChild(d);
+let d = $('#dir-seg', ds);
+if (!d) { d = document.createElement('div'); d.id = 'dir-seg'; ds.appendChild(d); }
 seg(d, {value: st.doc.dir, options: [{value: 'toBase', label: 'Pack → single', icon: 'split'}, {value: 'toPack', label: 'Single → pack', icon: 'merge'}], onChange: App.setDir});
-}
+} else if (ds.firstChild) ds.textContent = '';
 $('#undo-btn').disabled = !st.undo.length;
 $('#redo-btn').disabled = !st.redo.length;
 $('#undo-btn').title = st.undo.length ? 'Undo ' + st.undo[st.undo.length - 1].label.toLowerCase() + ' (Ctrl+Z)' : 'Nothing to undo';
@@ -98,7 +101,7 @@ gAnim = g.animate([
 {transform: `translateX(${L0}px) scaleY(1)`, width: cur.w + 'px', easing: 'cubic-bezier(.45,0,.55,1)'},
 {offset: .48, transform: `translateX(${mL}px) scaleY(${far ? .9 : 1})`, width: (mR - mL) + 'px', easing: 'cubic-bezier(.22,1.25,.4,1)'},
 {transform: `translateX(${L1}px) scaleY(1)`, width: to.w + 'px'}
-], {duration: Math.min(560, 340 + Math.abs(L1 - L0) * .25)});
+], {duration: Math.min(380, 240 + Math.abs(L1 - L0) * .18)});
 gAnim.onfinish = () => { gAnim = null; };
 }
 function renderDock() {
@@ -113,29 +116,48 @@ b.setAttribute('aria-selected', on);
 b.tabIndex = on ? 0 : -1;
 b.disabled = !!(t.data && !st.src);
 const bd = $('.dock-badge', b);
+const txt = n ? String(n > 99 ? '99+' : n) : '';
 bd.classList.toggle('hidden', !n);
-bd.textContent = n ? (n > 99 ? '99+' : n) : '';
+if (bd.textContent !== txt) bd.textContent = txt;
+b.setAttribute('aria-label', t.label + (n ? ` (${n} to check)` : ''));
 });
-moveGlider(true);
+moveGlider(!document.documentElement.classList.contains('booting'));
 }
 
+let enterT = 0;
 function renderView(switched) {
 const main = $('#view');
+if (!validTab(App.tab)) { App.tab = 'source'; switched = true; renderDock(); }
 const v = App.views[App.tab];
-if (switched) { main.classList.remove('enter'); void main.offsetWidth; main.classList.add('enter'); main.dataset.view = App.tab; }
-v.render(main, switched);
+App.switching = !!switched;
+if (switched) {
+main.onscroll = null;
+main.dataset.view = App.tab;
+main.classList.remove('enter');
+if (!document.documentElement.classList.contains('booting')) { void main.offsetWidth; main.classList.add('enter'); clearTimeout(enterT); enterT = setTimeout(() => main.classList.remove('enter'), 420); }
 }
+try { v.render(main, switched); } finally { App.switching = false; }
+if (switched) main.scrollTop = 0;
+}
+App.paint = (main, html) => { if (App.switching) main.innerHTML = html; else morph(main, html); };
 
 const THEMES = [{value: 'system', label: 'System', icon: 'monitor'}, {value: 'light', label: 'Light', icon: 'sun'}, {value: 'dark', label: 'Dark', icon: 'moon'}];
 App.THEMES = THEMES;
 const darkMq = matchMedia('(prefers-color-scheme: dark)');
+let themeT = 0, themeIcon = null;
 App.applyTheme = () => {
 const t = THEMES.some(x => x.value === st.S.theme) ? st.S.theme : 'system';
-const dark = t === 'dark' || (t === 'system' && darkMq.matches);
-document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-document.body.dataset.density = st.S.density;
+const next = t === 'dark' || (t === 'system' && darkMq.matches) ? 'dark' : 'light';
+const root = document.documentElement;
+if (root.dataset.theme !== next) {
+root.classList.add('theme-swap');
+root.dataset.theme = next;
+cancelAnimationFrame(themeT);
+themeT = requestAnimationFrame(() => { themeT = requestAnimationFrame(() => root.classList.remove('theme-swap')); });
+}
+if (document.body.dataset.density !== st.S.density) document.body.dataset.density = st.S.density;
 const b = $('#theme-btn');
-if (b) { const cur = THEMES.find(x => x.value === t); b.innerHTML = icon(cur.icon); b.title = 'Theme: ' + cur.label; }
+if (b && themeIcon !== t) { const cur = THEMES.find(x => x.value === t); b.innerHTML = icon(cur.icon); b.title = 'Theme: ' + cur.label; b.setAttribute('aria-label', 'Theme: ' + cur.label); themeIcon = t; }
 };
 function themeMenu(anchor) {
 menu(anchor, [{head: 'Theme'}].concat(THEMES.map(x => ({label: x.label, icon: x.icon, active: (st.S.theme || 'system') === x.value, run: () => ST.setS({theme: x.value})}))));
@@ -143,6 +165,8 @@ menu(anchor, [{head: 'Theme'}].concat(THEMES.map(x => ({label: x.label, icon: x.
 
 App.refresh = what => {
 App.applyTheme();
+if (!validTab(App.tab)) App.tab = 'source';
+rememberTab();
 renderHeader();
 renderDock();
 const v = App.views[App.tab];
@@ -179,7 +203,8 @@ if (lines.slice(0, 10).some(l => l.includes('\t'))) return lines.map(l => l.spli
 const wb = XLSX.read(txt, {type: 'string', raw: true});
 return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
 }
-App.loadText = (txt, name) => { if (!txt.trim()) return toast('Paste some rows first', {tone: 'warn', icon: 'alert'}); try { App.loadGrid(parseText(txt), name); } catch { toast('Could not read that text', {tone: 'warn', icon: 'alert'}); } };
+App.loadText = (txt, name) => { if (!txt || !txt.trim()) return toast('Paste some rows first', {tone: 'warn', icon: 'alert'}); try { App.loadGrid(parseText(txt), name); } catch { toast('Could not read that text', {tone: 'warn', icon: 'alert'}); } };
+App.guardReplace = async () => !st.src || !st.undo.length || await confirm({title: 'Replace this file?', body: 'Edits made to the current file will be lost. Settings and remembered packs are kept.', ok: 'Replace'});
 App.ALL_SHEETS = '__all__';
 App.loadAllSheets = () => {
 if (!st.wb || !st.src || !st.src.sheets) return;
@@ -201,7 +226,8 @@ if (name === App.ALL_SHEETS) return App.loadAllSheets();
 if (!st.wb || !st.wb.Sheets[name]) return;
 App.loadGrid(XLSX.utils.sheet_to_json(st.wb.Sheets[name], {header: 1, raw: true, defval: ''}), st.src.name, st.wb, name);
 };
-App.readFile = file => {
+App.readFile = async file => {
+if (!await App.guardReplace()) return;
 const base = file.name.replace(/\.[^.]+$/, '') || 'bugvert';
 const r = new FileReader();
 r.onerror = () => toast('Could not read this file', {tone: 'warn', icon: 'alert'});
@@ -268,8 +294,8 @@ P16\tZyrtec 10mg 20s\t10 T\t30\t8\t240
 P17\tParacetamol 500 \u0645\u062c\u0645 24 \u0642\u0631\u0635\t\u0642\u0631\u0635\t240\t0.5\t120
 P18\tInsulin Glargine 100u/ml pen\tSyringe\t25\t60\t1500
 P19\tPanadol Extra 500mg 24s\t1 T\t96\t0.75\t72`;
-App.loadSample = () => App.loadText(SAMPLE, 'sample-pharmacy');
-App.loadSample2 = () => App.loadText(SAMPLE2, 'sample-singles');
+App.loadSample = async () => { if (await App.guardReplace()) App.loadText(SAMPLE, 'sample-pharmacy'); };
+App.loadSample2 = async () => { if (await App.guardReplace()) App.loadText(SAMPLE2, 'sample-singles'); };
 
 App.views.source = {
 render(main) {
@@ -278,7 +304,7 @@ const r = ST.res();
 const d = st.doc, src = st.src;
 const da = d.dirAuto || {packs: 0, singles: 0};
 const tot = da.packs + da.singles;
-main.innerHTML = `
+App.paint(main, `
 <section class="src-top">
 <article class="card src-file">
 <div class="sf-ic">${icon('file')}</div>
@@ -298,14 +324,14 @@ ${detCard(r)}
 <section class="card src-cols">
 <header class="sec-head"><div><h3>Columns</h3><p>Picked from what's inside each column, not just the header. Tap a tag to change it.</p></div>
 <div class="role-legend">${Object.keys(ROLES).filter(k => k !== 'value').map(k => `<span class="rl ${d.roles[k] >= 0 ? '' : 'missing'}"><i class="role-dot r-${k}"></i>${ROLES[k].label}${d.roles[k] >= 0 ? '' : ' · missing'}</span>`).join('')}</div></header>
-<div class="col-cards">${src.headers.map((h, i) => colCard(h, i)).join('')}</div>
+<div class="col-cards" id="col-cards">${src.headers.map((h, i) => colCard(h, i)).join('')}</div>
 </section>
 <section class="src-next">
 <div class="sn-stats">
 <span><b>${r.stats.rows}</b> rows ready</span><span><b>${r.stats.converted}</b> will convert</span>${r.stats.groups ? `<span><b>${r.stats.groups}</b> duplicate groups</span>` : ''}${r.stats.issues ? `<span class="warn"><b>${r.stats.issues}</b> need a look</span>` : ''}
 </div>
 <button class="btn primary lg" id="open-sheet">Open sheet ${icon('arrow')}</button>
-</section>`;
+</section>`);
 $$('.dir-opt', main).forEach(b => b.onclick = () => b.dataset.dir !== d.dir && App.setDir(b.dataset.dir));
 if (d.dir === 'toPack') stepper($('#src-pack', main), {value: st.S.packSize, min: 1, max: 1000, onChange: v => ST.setS({packSize: v})});
 $('#replace-btn', main).onclick = App.pickFile;
@@ -316,10 +342,11 @@ $$('.role-tag', main).forEach(b => b.onclick = () => roleMenu(b, +b.dataset.i));
 $$('[data-det]', main).forEach(b => b.onclick = () => {
 const k = b.dataset.det;
 if (k === 'settings') { App.settingsFocus = 'detect'; return App.go('settings'); }
-st.view = {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null};
-if (k.startsWith('f:')) { st.view.quick = E.ISSUE_FLAGS.includes(k.slice(2)) ? 'issues' : 'all'; st.view.flag = k.slice(2); }
-else if (k.startsWith('t:')) st.view.tsrc = k.slice(2);
-else if (k.startsWith('c:')) st.view.conf = k.slice(2);
+const p = {};
+if (k.startsWith('f:')) { p.quick = E.ISSUE_FLAGS.includes(k.slice(2)) ? 'issues' : 'all'; p.flag = k.slice(2); }
+else if (k.startsWith('t:')) p.tsrc = k.slice(2);
+else if (k.startsWith('c:')) p.conf = k.slice(2);
+ST.setView(p);
 App.go('sheet');
 });
 const ns = $('#det-name-seg', main);
@@ -357,7 +384,7 @@ const samples = [];
 for (const r of st.src.rows) { const v = E.clean(r[i]); if (v && !samples.includes(v)) samples.push(v); if (samples.length >= 3) break; }
 const tag = role ? `<i class="role-dot r-${role}"></i>${ROLES[role].label}` : ign ? `${icon('eyeOff')}Ignored` : (KIND[kind] || 'Info');
 const conf = role && d.conf[i] && d.roles[role] === i && st.det.roles[role] === i ? d.conf[i] : '';
-return `<article class="col-card ${role ? 'has-role r-' + role : ''} ${ign ? 'ignored' : ''}">
+return `<article class="col-card ${role ? 'has-role r-' + role : ''} ${ign ? 'ignored' : ''}" data-key="cc-${i}">
 <div class="cc-top"><span class="cc-h" title="${esc(h)}">${esc(h)}</span><button class="role-tag ${role ? 'r-' + role : ''}" data-i="${i}">${tag}${icon('chevron', 'sel-chev')}</button></div>
 <ul class="cc-samples">${samples.map(s => `<li>${esc(s)}</li>`).join('') || '<li class="muted">empty</li>'}</ul>
 <div class="cc-foot">${conf ? `<span class="conf c-${conf}">${conf === 'high' ? 'sure' : conf === 'medium' ? 'likely' : 'guess'}</span>` : ''}${ign && d.reasons[i] ? `<span class="cc-why">${esc(d.reasons[i])}</span>` : ''}</div>
@@ -383,7 +410,7 @@ menu(anchor, items);
 
 function renderStart(main) {
 const ses = ST.savedSession();
-main.innerHTML = `
+App.paint(main, `
 <section class="hero">
 <div class="hero-copy">
 <span class="eyebrow">${icon('spark')}bugvert 2.5</span>
@@ -407,16 +434,18 @@ ${ses ? `<button class="resume" id="resume-btn"><span class="rs-ic">${icon('rese
 <li>${icon('swap')}<span><b>Knows the direction</b>Packs to singles or singles to packs, picked for you</span></li>
 <li>${icon('edit')}<span><b>Control every row</b>Pack size, price and duplicates, row by row</span></li>
 </ul>
-</section>`;
+</section>`);
 const dz = $('#drop-zone', main);
 dz.onclick = App.pickFile;
-['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
-['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
-dz.addEventListener('drop', e => e.dataTransfer.files[0] && App.readFile(e.dataTransfer.files[0]));
-$('#parse-btn', main).onclick = () => App.loadText($('#paste-input', main).value);
-$('#paste-input', main).addEventListener('paste', () => setTimeout(() => App.loadText($('#paste-input', main).value), 0));
+dz.ondragenter = dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
+dz.ondragleave = e => { if (!dz.contains(e.relatedTarget)) dz.classList.remove('over'); };
+dz.ondrop = e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('over'); if (e.dataTransfer.files[0]) App.readFile(e.dataTransfer.files[0]); };
+const pi = $('#paste-input', main);
+$('#parse-btn', main).onclick = () => App.loadText(pi.value);
+pi.onpaste = e => { e.stopPropagation(); setTimeout(() => { if (pi.value.includes('\t') || pi.value.includes('\n')) App.loadText(pi.value); }, 0); };
+pi.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); App.loadText(pi.value); } };
 $('#sample-btn', main).onclick = e => menu(e.currentTarget, [{head: 'Samples'}, {label: 'Packs sheet', hint: 'Pack → single, units in their own column', icon: 'split', run: App.loadSample}, {label: 'Singles sheet', hint: 'Single → pack, pack sizes inside item names', icon: 'merge', run: App.loadSample2}]);
-if (ses) $('#resume-btn', main).onclick = () => { ST.resume(); App.go('sheet'); toast('Session restored', {icon: 'reset'}); };
+if (ses) $('#resume-btn', main).onclick = () => { if (!ST.resume()) return toast('That session could not be restored', {tone: 'warn', icon: 'alert'}); App.go('sheet'); toast('Session restored', {icon: 'reset'}); };
 }
 
 function boot() {
@@ -435,7 +464,7 @@ if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => move
 $('#undo-btn').onclick = () => { const l = ST.undo(); if (l) toast('Undid ' + l.toLowerCase(), {icon: 'undo'}); };
 $('#redo-btn').onclick = () => { const l = ST.redo(); if (l) toast('Redid ' + l.toLowerCase(), {icon: 'redo'}); };
 $('#export-cta').onclick = () => App.go('export');
-$('#new-btn').onclick = async () => { if (await confirm({title: 'Start over?', body: 'This clears the current data and all edits. Settings and remembered packs are kept.', ok: 'Start over', danger: true})) { ST.close(); App.tab = 'source'; App.refresh('close'); } };
+$('#new-btn').onclick = async () => { if (await confirm({title: 'Start over?', body: 'This clears the current data and all edits. Settings and remembered packs are kept.', ok: 'Start over', danger: true})) { App.tab = 'source'; ST.close(); } };
 $('#brand').onclick = () => App.go('source');
 $('#theme-btn').onclick = e => themeMenu(e.currentTarget);
 const onScheme = () => { if ((st.S.theme || 'system') === 'system') App.applyTheme(); };
@@ -450,15 +479,21 @@ else if (mod && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); $(
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0] && !e.target.closest('#drop-zone')) App.readFile(e.dataTransfer.files[0]); });
 document.addEventListener('paste', e => {
-if (e.target.closest('input, textarea')) return;
+if (e.target.closest('input, textarea, [contenteditable]')) return;
 if (st.src && App.tab !== 'source') return;
 const t = e.clipboardData && e.clipboardData.getData('text');
 if (t && t.includes('\t')) { e.preventDefault(); App.loadText(t); }
 });
 document.body.dataset.density = st.S.density;
+let want = null;
+try { want = sessionStorage.getItem(TAB_KEY); } catch {}
+if (ST.savedSession()) ST.resume(true);
+App.tab = validTab(want) ? want : st.src && want ? 'sheet' : 'source';
 renderHeader();
 renderDock();
 renderView(true);
+rememberTab();
+requestAnimationFrame(() => requestAnimationFrame(() => { document.documentElement.classList.remove('booting'); moveGlider(false); }));
 }
 App.boot = boot;
 return App;
