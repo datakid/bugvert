@@ -1,384 +1,164 @@
-(() => {
-const $ = s => document.querySelector(s);
-const ALIASES = {
-tab: ['T','TAB','TABS','TABLET','TABLETS','TB','TBL','PILL','PILLS','P','قرص','اقراص','أقراص','ق','F','FT','FC','FILM','ODT','CHEW'],
-cap: ['C','CAP','CAPS','CAPSULE','CAPSULES','كبسول','كبسولة','ك','SOFTGEL','SG'],
-supp: ['SUPP','SUPPS','SUP','SUPPOSITORY','SUPPOSITORIES','لبوس','لبوسة'],
-sachet: ['SACH','SACHET','SACHETS','SACHS','SAC','كيس','اكياس','أكياس'],
-amp: ['AMP','AMPS','AMPOULE','AMPOULES','امبول','أمبول'],
-vial: ['VIAL','VIALS','V','فيال'],
-syringe: ['SYRINGE','SYR','PFS','PREFILLED','سرنجة','حقنة'],
-inh: ['INH','INHALER','PUFF','PUFFS','بخاخ'],
-bottle: ['B','BOT','BTL','BOTTLE','زجاجة'],
-tube: ['TUBE','TUB','انبوبة','أنبوبة'],
-patch: ['PATCH','PATCHES','لصقة'],
-drop: ['DROP','DROPS','قطرة'],
-lozenge: ['LOZ','LOZENGE','LOZENGES'],
-box: ['BOX','BX','PK','PACK','علبة','عبوة'],
-strip: ['STRIP','STRIPS','STR','شريط']
+window.App = (() => {
+const {$, $$, esc, icon, toast, menu, select, seg, stepper, confirm, fmt} = UI;
+const E = Engine, ST = Store, st = Store.st;
+const App = {tab: 'source', views: {}};
+
+const TABS = [
+{id: 'source', label: 'Source', icon: 'import'},
+{id: 'sheet', label: 'Sheet', icon: 'sheet', data: true},
+{id: 'units', label: 'Units', icon: 'units', data: true},
+{id: 'dups', label: 'Duplicates', icon: 'dups', data: true},
+{id: 'columns', label: 'Columns', icon: 'columns', data: true},
+{id: 'export', label: 'Export', icon: 'export', data: true},
+{id: 'settings', label: 'Settings', icon: 'settings'}
+];
+const ROLES = {
+name: {label: 'Name', hint: 'Item name, used for duplicates and memory'},
+unit: {label: 'Unit', hint: 'Pack text like 10 T, 8 C, Syringe'},
+price: {label: 'Price', hint: 'Price per old unit'},
+qty: {label: 'Quantity', hint: 'Stock in old units'},
+value: {label: 'Value', hint: 'Price × quantity, used only for detection'}
 };
-const FAMILY_NAME = {tab:'Tablets',cap:'Capsules',supp:'Suppositories',sachet:'Sachets',amp:'Ampoules',vial:'Vials',syringe:'Syringes',inh:'Inhalers',bottle:'Bottles',tube:'Tubes',patch:'Patches',drop:'Drops',lozenge:'Lozenges',box:'Boxes',strip:'Strips'};
-const TOKEN_MAP = {};
-Object.entries(ALIASES).forEach(([k, arr]) => arr.forEach(a => TOKEN_MAP[a] = k));
-const HINTS = {
-unit: ['unit','uom','pack','الوحدة','وحدة','العبوة'],
-price: ['price','cost','السعر','سعر','ثمن'],
-name: ['name','item','product','drug','description','الاسم','اسم','الصنف'],
-qty: ['qty','quantity','stock','balance','الرصيد','رصيد','الكمية','كمية']
+const KIND = {code: 'Code', category: 'Category', other: 'Info'};
+App.ROLES = ROLES;
+App.FLAG = {
+noUnit: 'No unit', badUnit: 'Unit could not be read', unknownUnit: 'Unit word not in the dictionary', noPrice: 'No price', noQty: 'No quantity', zeroQty: 'Quantity is 0',
+partial: 'Quantity no longer whole', review: 'Duplicate prices disagree', edited: 'Edited by you', custom: 'Custom pack size', merged: 'Merged duplicates', dup: 'Has duplicates kept separate', junk: 'Empty row'
 };
-const state = {headers: [], rows: [], cols: {}, parsed: [], families: {}, enabled: new Set(), offCols: new Set(), offRows: new Set(), output: null, fileName: 'bugvert'};
+App.TSRC = {rule: 'Unit rule', unit: 'Unit default', default: 'Default pack size', memory: 'Remembered pack', name: 'Read from item name', row: 'Set by you', keep: 'Kept as is', off: 'Unit not converted', already: 'Already a pack', none: ''};
 
-const toLatin = s => String(s ?? '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/٫/g, '.').replace(/[٬،]/g, ',');
-const clean = s => toLatin(s).replace(/[\u200e\u200f\u00a0\u202a-\u202e]/g, ' ').replace(/\s+/g, ' ').trim();
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-function parseNum(v) {
-if (typeof v === 'number') return isFinite(v) ? v : null;
-let s = clean(v).replace(/[^\d.,\-]/g, '');
-if (!s || !/\d/.test(s)) return null;
-if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
-else if (s.includes(',')) s = /,\d{3}$/.test(s) && s.split(',').length > 1 && !/,\d{1,2}$/.test(s) ? s.replace(/,/g, '') : s.replace(',', '.');
-const n = parseFloat(s);
-return isFinite(n) ? n : null;
-}
-
-function tokenFamily(tok) {
-const t = tok.toUpperCase().replace(/[.\s]/g, '');
-if (TOKEN_MAP[t]) return TOKEN_MAP[t];
-if (t.length > 3 && t.endsWith('S') && TOKEN_MAP[t.slice(0, -1)]) return TOKEN_MAP[t.slice(0, -1)];
-for (const [k, arr] of Object.entries(ALIASES)) if (t.length >= 3 && arr.some(a => a.length >= 3 && (a.startsWith(t) || t.startsWith(a)))) return k;
-return 'x:' + t;
-}
-
-function parseUnit(raw) {
-const s = clean(raw);
-if (!s) return null;
-let m, count = null, tok = '';
-const W = '([A-Za-z\\u0600-\\u06FF][A-Za-z\\u0600-\\u06FF.]*)';
-if ((m = s.match(new RegExp('^(\\d+(?:\\.\\d+)?)\\s*[x*×]\\s*(\\d+(?:\\.\\d+)?)\\s*' + W + '?$', 'i')))) { count = +m[1] * +m[2]; tok = m[3] || 'T'; }
-else if ((m = s.match(new RegExp('^(\\d+(?:\\.\\d+)?)\\s*' + W + '$')))) { count = +m[1]; tok = m[2]; }
-else if ((m = s.match(new RegExp('^' + W + '\\s*[x*×:\\-]?\\s*(\\d+(?:\\.\\d+)?)$')))) { count = +m[2]; tok = m[1]; }
-else if ((m = s.match(new RegExp('^' + W + '(?:\\s+' + W + ')?$')))) { count = 1; tok = m[1]; }
-else if ((m = s.match(/^(\d+(?:\.\d+)?)$/))) { return {count: +m[1], tok: '', family: 'x:#', raw: s, bare: true}; }
-else if ((m = s.match(/(\d+(?:\.\d+)?)\s*([A-Za-z\u0600-\u06FF]+)/))) { count = +m[1]; tok = m[2]; }
-else return null;
-tok = tok.replace(/\.$/, '');
-if (!count || count <= 0) return null;
-return {count, tok, family: tokenFamily(tok), raw: s};
-}
-
-function scoreColumns(headers, rows) {
-const sample = rows.slice(0, 400);
-return headers.map((h, i) => {
-const vals = sample.map(r => r[i]).filter(v => clean(v) !== '');
-const n = vals.length || 1;
-const hl = clean(h).toLowerCase();
-const hint = k => HINTS[k].some(w => hl.includes(w)) ? 1 : 0;
-const nums = vals.map(parseNum);
-const numericRatio = vals.filter(v => /^[\d\s.,\-٠-٩٫]+$/.test(clean(v)) && parseNum(v) !== null).length / n;
-const unitRatio = vals.filter(v => { const p = parseUnit(v); return p && !p.bare && clean(v).length <= 14; }).length / n;
-const knownRatio = vals.filter(v => { const p = parseUnit(v); return p && !p.family.startsWith('x:') && clean(v).length <= 14; }).length / n;
-const packRatio = vals.filter(v => /\d\s*[A-Za-z\u0600-\u06FF]/.test(clean(v)) && clean(v).length <= 14).length / n;
-const uniq = new Set(vals.map(clean)).size / n;
-const avgLen = vals.reduce((a, v) => a + clean(v).length, 0) / n;
-const latinRatio = vals.filter(v => /[A-Za-z]{3,}/.test(v)).length / n;
-const decRatio = nums.filter(x => x !== null && Math.abs(x % 1) > 0).length / n;
-const fill = vals.length / (sample.length || 1);
-return {
-i,
-unit: unitRatio + knownRatio * 2 + packRatio * 2 + (uniq < .3 ? .5 : 0) - (avgLen > 16 ? 2 : 0) + hint('unit') * 3,
-price: numericRatio * 2 + decRatio + fill * .5 + hint('price') * 3 - (clean(h).match(/قيمة|value|total/i) ? 1.5 : 0),
-name: latinRatio + uniq * 2 + Math.min(avgLen, 30) / 15 - numericRatio * 3 - unitRatio * 2 + hint('name') * 3,
-qty: numericRatio * 1.5 - decRatio + (fill < .9 ? .3 : 0) + hint('qty') * 3 - hint('price') * 3
+App.roleOf = i => Object.keys(st.doc.roles).find(r => st.doc.roles[r] === i) || null;
+let numMemo = new Map();
+App.numCol = i => {
+if (numMemo.has(i)) return numMemo.get(i);
+let n = 0, t = 0;
+for (const r of st.src.rows) { if (E.clean(r[i]) === '') continue; t++; if (E.isNumCell(r[i])) n++; if (t > 300) break; }
+const v = t > 0 && n / t > .8; numMemo.set(i, v); return v;
 };
-});
+App.colMeta = key => {
+if (key.startsWith('o:')) {
+const i = +key.slice(2), role = App.roleOf(i);
+return {key, i, label: st.src.headers[i], isNew: false, role, num: role === 'price' || role === 'qty' || role === 'value' || App.numCol(i), editable: true};
 }
-
-function pickCols() {
-const sc = scoreColumns(state.headers, state.rows);
-const used = new Set();
-const pick = key => {
-const best = [...sc].filter(s => !used.has(s.i)).sort((a, b) => b[key] - a[key])[0];
-if (!best || best[key] <= .8) return -1;
-used.add(best.i);
-return best.i;
+return {key, label: st.S.labels[key] || key, isNew: true, num: E.NUM_NEW.has(key), editable: ['new.unit', 'new.price', 'new.qty'].includes(key)};
 };
-const unit = pick('unit'), name = pick('name'), price = pick('price'), qty = pick('qty');
-state.cols = {unit, name, price, qty};
+App.colLabel = c => c.label || App.colMeta(c.key).label;
+App.visibleCols = () => st.doc.columns.filter(c => c.on && (!c.key.startsWith('o:') || +c.key.slice(2) < st.src.headers.length));
+
+App.go = id => {
+const t = TABS.find(x => x.id === id);
+if (!t || (t.data && !st.src)) return;
+if (App.tab === id) return;
+UI.closePop();
+document.body.classList.remove('bulk-on');
+App.tab = id;
+renderDock();
+renderView(true);
+};
+
+function renderHeader() {
+const h = $('#app-header');
+const loaded = !!st.src;
+$('#file-slot', h).innerHTML = loaded ? `<button class="file-chip" id="file-chip" title="Source">${icon('file')}<span class="fc-name">${esc(st.src.name)}</span><span class="fc-meta">${st.src.rows.length} rows</span></button>` : '';
+const ds = $('#dir-slot', h);
+ds.innerHTML = '';
+if (loaded) {
+const d = document.createElement('div'); d.id = 'dir-seg';
+ds.appendChild(d);
+seg(d, {value: st.doc.dir, options: [{value: 'toBase', label: 'Pack → single', icon: 'split'}, {value: 'toPack', label: 'Single → pack', icon: 'merge'}], onChange: App.setDir});
+}
+$('#undo-btn').disabled = !st.undo.length;
+$('#redo-btn').disabled = !st.redo.length;
+$('#undo-btn').title = st.undo.length ? 'Undo ' + st.undo[st.undo.length - 1].label.toLowerCase() + ' (Ctrl+Z)' : 'Nothing to undo';
+$('#redo-btn').title = st.redo.length ? 'Redo ' + st.redo[st.redo.length - 1].label.toLowerCase() + ' (Ctrl+Shift+Z)' : 'Nothing to redo';
+$('#hist').classList.toggle('hidden', !loaded);
+$('#export-cta').classList.toggle('hidden', !loaded);
+$('#new-btn').classList.toggle('hidden', !loaded);
+if (loaded) $('#file-chip').onclick = () => App.go('source');
 }
 
-function detectHeaderRow(grid) {
-let best = 0, bestScore = -1;
-for (let r = 0; r < Math.min(grid.length, 20); r++) {
-const row = grid[r] || [];
-const filled = row.filter(c => clean(c) !== '');
-const textual = filled.filter(c => parseNum(c) === null && clean(c).length < 40).length;
-const s = textual * 2 + filled.length - (filled.length < 2 ? 100 : 0);
-if (s > bestScore) { bestScore = s; best = r; }
-}
-return best;
-}
-
-function loadGrid(grid) {
-grid = grid.map(r => (r || []).map(c => c == null ? '' : c)).filter(r => r.some(c => clean(c) !== ''));
-if (!grid.length) return toast('No data found');
-const width = Math.max(...grid.map(r => r.length));
-grid = grid.map(r => { const a = r.slice(); while (a.length < width) a.push(''); return a; });
-const keep = [...Array(width).keys()].filter(i => grid.some(r => clean(r[i]) !== ''));
-grid = grid.map(r => keep.map(i => r[i]));
-const hr = detectHeaderRow(grid);
-const headers = grid[hr].map((h, i) => clean(h) || 'Column ' + (i + 1));
-const seen = {};
-state.headers = headers.map(h => seen[h] ? h + ' (' + (++seen[h]) + ')' : (seen[h] = 1, h));
-state.rows = grid.slice(hr + 1).filter(r => !r.every((c, i) => clean(c) === clean(grid[hr][i])));
-if (!state.rows.length) return toast('Only a header row was found');
-state.offCols.clear();
-state.offRows.clear();
-pickCols();
-analyze(true);
-$('#settings-section').classList.remove('hidden');
-$('#result-section').classList.remove('hidden');
-fillSelects();
-}
-
-function analyze(resetEnabled) {
-const {unit} = state.cols;
-state.parsed = state.rows.map(r => unit >= 0 ? parseUnit(r[unit]) : null);
-const fam = {};
-state.parsed.forEach(p => {
-if (!p) return;
-const f = fam[p.family] ||= {family: p.family, rows: 0, tokens: {}, counts: {}};
-f.rows++;
-f.tokens[p.tok] = (f.tokens[p.tok] || 0) + 1;
-f.counts[p.count] = (f.counts[p.count] || 0) + 1;
-});
-Object.values(fam).forEach(f => {
-f.label = Object.entries(f.tokens).sort((a, b) => b[1] - a[1])[0][0] || '#';
-f.multi = Object.keys(f.counts).some(c => +c > 1);
-f.title = FAMILY_NAME[f.family] || (f.family === 'x:#' ? 'Bare numbers' : f.label);
-});
-state.families = fam;
-if (resetEnabled) state.enabled = new Set(Object.values(fam).filter(f => f.multi && !f.family.startsWith('x:')).map(f => f.family));
-renderChips();
-run();
-}
-
-const ROLES = ['unit', 'price', 'name', 'qty'];
-const ROLE_LABEL = {unit: 'Unit', price: 'Price', name: 'Name', qty: 'Quantity'};
-function fillSelects() {
-ROLES.forEach(k => {
-const el = $('#' + k + '-col');
-el.innerHTML = '<option value="-1">— none —</option>' + state.headers.map((h, i) => {
-const other = ROLES.find(r => r !== k && state.cols[r] === i);
-return `<option value="${i}">${esc(h)}${other ? ' · ' + ROLE_LABEL[other] : ''}</option>`;
-}).join('');
-el.value = String(state.cols[k]);
+function renderDock() {
+const dock = $('#dock');
+const r = ST.res();
+const badge = {sheet: r && r.stats.issues, units: r && r.stats.unknown, dups: r && r.stats.review};
+dock.innerHTML = TABS.map(t => {
+const dis = t.data && !st.src;
+const b = badge[t.id];
+return `<button class="dock-b ${App.tab === t.id ? 'on' : ''}" data-tab="${t.id}" ${dis ? 'disabled' : ''} role="tab" aria-selected="${App.tab === t.id}">${icon(t.icon)}<span class="dock-l">${t.label}</span>${b ? `<b class="dock-badge">${b > 99 ? '99+' : b}</b>` : ''}</button>`;
+}).join('') + '<span class="dock-glider"></span>';
+requestAnimationFrame(() => {
+const on = $('.dock-b.on', dock), g = $('.dock-glider', dock);
+if (!on) return;
+g.style.width = on.offsetWidth + 'px';
+g.style.transform = `translateX(${on.offsetLeft}px)`;
 });
 }
-function setRole(k, v) {
-const prev = state.cols[k];
-if (prev === v) return;
-const clash = v >= 0 ? ROLES.find(r => r !== k && state.cols[r] === v) : null;
-state.cols[k] = v;
-if (clash) {
-state.cols[clash] = prev;
-toast(`${ROLE_LABEL[clash]} moved to ${prev >= 0 ? '“' + state.headers[prev] + '”' : 'none'}`);
-}
-fillSelects();
-analyze(k === 'unit' || clash === 'unit');
+
+function renderView(switched) {
+const main = $('#view');
+const v = App.views[App.tab];
+if (switched) { main.classList.remove('enter'); void main.offsetWidth; main.classList.add('enter'); main.dataset.view = App.tab; }
+v.render(main, switched);
 }
 
-function renderChips() {
-const fams = Object.values(state.families).sort((a, b) => b.rows - a.rows);
-$('#unit-chips').innerHTML = fams.length ? fams.map(f => `<span class="chip ${state.enabled.has(f.family) ? 'on' : ''}" data-f="${esc(f.family)}" title="${esc(Object.keys(f.tokens).join(', '))}">${esc(f.title)} <small>${f.rows}</small></span>`).join('') : '<span class="sugg">No units detected — pick the unit column above.</span>';
-}
+App.refresh = what => {
+renderHeader();
+renderDock();
+const v = App.views[App.tab];
+if (what === 'open' || what === 'close') { renderView(true); return; }
+if (v.update) v.update(what); else renderView(false);
+};
+ST.on(App.refresh);
 
-function suggest(out) {
-const s = [];
-const fams = Object.values(state.families);
-const unknown = fams.filter(f => f.family.startsWith('x:') && f.multi);
-if (unknown.length) s.push(`Unrecognized pack units: ${unknown.map(f => '“' + f.label + '”').join(', ')} — tap them above to convert anyway.`);
-const unparsed = state.parsed.filter((p, i) => !p && clean(state.rows[i][state.cols.unit]) !== '').length;
-if (unparsed) s.push(`${unparsed} rows have unreadable units and were left untouched.`);
-const noPrice = state.cols.price >= 0 ? state.rows.filter(r => parseNum(r[state.cols.price]) === null).length : 0;
-if (noPrice) s.push(`${noPrice} rows have no valid price.`);
-if ($('#merge-toggle').checked && state.cols.name < 0) s.push('Merging needs a name column — pick one above.');
-if (!$('#merge-toggle').checked && out.dupes) s.push(`${out.dupes} items share name + unit after conversion — enable merge to combine them.`);
-if ($('#merge-toggle').checked && out.conflicts) s.push(`${out.conflicts} merged items combined prices that differ by more than 50% — review the highlighted rows or change the merged price rule.`);
-const counts = {};
-state.parsed.forEach(p => { if (p && p.count > 1) counts[p.count] = (counts[p.count] || 0) + 1; });
-const common = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-if (common && $('#direction').value === 'toPack' && +$('#pack-size').value !== +common[0]) s.push(`Most common pack size in this file is ${common[0]}.`);
-$('#suggestions').innerHTML = s.map(x => `<div class="sugg">${esc(x)}</div>`).join('');
-}
+App.setDir = dir => {
+const label = dir === 'toBase' ? 'Pack → single' : 'Single → pack';
+ST.commit('Change direction', d => { d.dir = dir; });
+toast(label + (dir === 'toPack' ? ` · default pack ${st.S.packSize}` : ''), {icon: dir === 'toBase' ? 'split' : 'merge'});
+};
 
-function round(n, d) { if (n == null) return ''; const f = Math.pow(10, d); return Math.round((n + Number.EPSILON) * f) / f; }
-
-function run() {
-const {unit, price, name, qty} = state.cols;
-const dir = $('#direction').value;
-const pack = Math.max(1, parseNum($('#pack-size').value) || 1);
-const dRaw = parseInt($('#decimals').value);
-const dec = isNaN(dRaw) ? 4 : Math.min(8, Math.max(0, dRaw));
-const merge = $('#merge-toggle').checked && name >= 0;
-const rescaleQty = qty >= 0 && ($('#qty-toggle').checked || merge);
-const withValue = $('#value-toggle').checked && price >= 0 && qty >= 0;
-const valueBasis = $('#value-basis').value;
-let items = state.rows.map((r, i) => {
-const p = state.parsed[i];
-const pr = price >= 0 ? parseNum(r[price]) : null;
-const q = qty >= 0 ? parseNum(r[qty]) : null;
-const base = {src: i, row: r, unitOut: unit >= 0 ? clean(r[unit]) : '', priceOut: pr, qtyOut: q, qtyIn: q, factor: 1, converted: false, count: 1};
-if (!p || !state.enabled.has(p.family)) return base;
-const f = state.families[p.family];
-const target = dir === 'toBase' ? 1 : pack;
-const factor = target / p.count;
-if (factor === 1) return {...base, unitOut: `${target} ${f.label}`, converted: true};
-return {...base, unitOut: `${target} ${f.label}`, priceOut: pr == null ? null : pr * factor, qtyOut: q == null ? null : q / factor, factor, converted: true, count: 1};
-});
-const keyOf = (it, i) => name >= 0 && clean(it.row[name]) ? clean(it.row[name]).toLowerCase() + '|' + it.unitOut.toLowerCase().replace(/\s+/g, '') : '#' + i;
-const groups = new Map();
-items.forEach((it, i) => { const k = keyOf(it, i); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); });
-const dupes = name >= 0 ? [...groups.values()].filter(g => g.length > 1).reduce((a, g) => a + g.length, 0) : 0;
-if (merge) {
-const strat = $('#merge-price') ? $('#merge-price').value : 'weighted';
-items = [...groups.values()].map(g => {
-if (g.length === 1) return g[0];
-const tq = g.reduce((a, x) => a + (x.qtyOut || 0), 0);
-const tqIn = g.reduce((a, x) => a + (x.qtyIn || 0), 0);
-const hasQ = g.some(x => x.qtyOut != null);
-const facs = new Set(g.map(x => round(x.factor, 6)));
-const prices = g.map(x => x.priceOut).filter(x => x != null);
-let p = null;
-if (prices.length) {
-if (strat === 'max') p = Math.max(...prices);
-else if (strat === 'min') p = Math.min(...prices);
-else if (strat === 'first') p = prices[0];
-else if (tq > 0) p = g.reduce((a, x) => a + (x.priceOut || 0) * (x.qtyOut || 0), 0) / tq;
-else p = prices.reduce((a, b) => a + b, 0) / prices.length;
-}
-const spread = prices.length > 1 ? Math.max(...prices) / Math.max(Math.min(...prices), 1e-9) : 1;
-return {...g[0], priceOut: p, qtyOut: qty >= 0 && hasQ ? tq : null, qtyIn: qty >= 0 && hasQ ? tqIn : null, factor: facs.size === 1 ? g[0].factor : null, merged: g.length, spread};
-});
-}
-const num = v => v == null || !isFinite(v) ? null : round(v, dec);
-const cols = state.headers.map((h, i) => ({key: 'o:' + h, label: h, isNew: false, num: i === price || i === qty}));
-const add = (label, num) => cols.push({key: 'n:' + label, label, isNew: true, num});
-add('Unit ↦', false);
-add('Price ↦', true);
-if (rescaleQty) add('Qty ↦', true);
-if (withValue) add('Value ↦', true);
-add('Factor', true);
-if (merge) add('Merged', true);
-const data = items.map(it => {
-const extra = [it.unitOut || null, num(it.priceOut)];
-if (rescaleQty) extra.push(num(it.qtyOut));
-if (withValue) {
-const qv = valueBasis === 'orig' ? it.qtyIn : it.qtyOut;
-extra.push(it.priceOut == null || qv == null ? null : num(it.priceOut * qv));
-}
-extra.push(it.factor == null ? null : round(it.factor, 6));
-if (merge) extra.push(it.merged || 1);
-return {cells: it.row.slice().concat(extra), it};
-});
-state.output = {cols, headers: cols.map(c => c.label), data, extraStart: state.headers.length, dupes, conflicts: items.filter(i => i.spread > 1.5).length};
-renderTable();
-suggest(state.output);
-const conv = items.filter(i => i.converted && i.factor !== 1).length;
-$('#stats').innerHTML = `<span><b>${state.rows.length}</b> rows</span><span><b>${conv}</b> converted</span>${merge ? `<span><b>${items.length}</b> after merge</span>` : ''}`;
-}
-
-function rowPasses(d) {
-const it = d.it, f = $('#row-filter').value;
-if (f === 'converted') return it.converted && it.factor !== 1;
-if (f === 'unchanged') return !(it.converted && it.factor !== 1);
-if (f === 'priced') return it.priceOut != null;
-if (f === 'stocked') return (it.qtyOut ?? it.qtyIn ?? 0) > 0;
-return true;
-}
-const visibleRows = () => state.output.data.filter(rowPasses);
-const exportRows = () => visibleRows().filter(d => !state.offRows.has(d.it.src));
-const exportCols = () => state.output.cols.map((c, i) => ({...c, i})).filter(c => !state.offCols.has(c.key));
-
-function renderTable() {
-const o = state.output;
-const LIMIT = 1500;
-const roleOf = i => ROLES.find(r => state.cols[r] === i);
-const rows = visibleRows();
-const onCount = rows.filter(d => !state.offRows.has(d.it.src)).length;
-const allOn = rows.length && onCount === rows.length;
-let h = `<thead><tr><th class="cb-col"><input type="checkbox" id="all-rows" aria-label="Include all rows" ${allOn ? 'checked' : ''}></th>` + o.cols.map((c, i) => {
-const off = state.offCols.has(c.key);
-const role = !c.isNew && roleOf(i);
-return `<th class="${c.isNew ? 'new' : ''} ${off ? 'off' : ''}"><label class="col-toggle"><input type="checkbox" class="col-cb" data-key="${esc(c.key)}" ${off ? '' : 'checked'}><span>${esc(c.label)}</span>${role ? `<span class="role">${ROLE_LABEL[role]}</span>` : ''}</label></th>`;
-}).join('') + '</tr></thead><tbody>';
-h += rows.slice(0, LIMIT).map(d => {
-const offR = state.offRows.has(d.it.src);
-return `<tr class="${d.it.spread > 1.5 ? 'conflict' : ''} ${d.it.merged > 1 ? 'merged' : ''} ${!d.it.converted ? 'skip' : ''} ${offR ? 'off' : ''}"><td class="cb-col"><input type="checkbox" class="row-cb" data-src="${d.it.src}" ${offR ? '' : 'checked'} aria-label="Include row"></td>` + d.cells.map((c, i) => `<td class="${o.cols[i].num ? 'num' : ''} ${state.offCols.has(o.cols[i].key) ? 'off' : ''}">${esc(c ?? '')}</td>`).join('') + '</tr>';
-}).join('');
-if (!rows.length) h += `<tr><td colspan="${o.cols.length + 1}" class="empty">No rows match this filter.</td></tr>`;
-if (rows.length > LIMIT) h += `<tr><td colspan="${o.cols.length + 1}" class="empty">Showing ${LIMIT} of ${rows.length} rows — export includes all of them.</td></tr>`;
-$('#result-table').innerHTML = h + '</tbody>';
-const ind = $('#all-rows');
-if (ind) ind.indeterminate = onCount > 0 && onCount < rows.length;
-updateSummary();
-}
-
-function updateSummary() {
-const r = exportRows().length, c = exportCols().length;
-$('#export-summary').innerHTML = `Exporting <b>${r}</b> rows × <b>${c}</b> columns`;
-}
-
-function exportValue(v, isNum) {
-if (v == null) return null;
-if (typeof v === 'number') return isFinite(v) ? v : null;
-const s = clean(v);
-if (s === '' || /^(null|undefined|nan)$/i.test(s)) return null;
-if (/^-?\d+(\.\d+)?$/.test(s) && !/^-?0\d/.test(s)) return Number(s);
-if (isNum) { const n = parseNum(s); if (n !== null) return n; }
-return String(v).trim();
-}
-
-function exportGrid() {
-const cols = exportCols();
-return [cols.map(c => c.label)].concat(exportRows().map(d => cols.map(c => exportValue(d.cells[c.i], c.num))));
-}
-
-function toTSV() {
-const cell = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
-return exportGrid().map(r => r.map(cell).join('\t')).join('\n');
-}
-
-async function copy(text) {
-try { await navigator.clipboard.writeText(text); }
-catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
-toast('Copied to clipboard');
-}
-
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1800); }
+App.loadGrid = (grid, name, wb, sheet) => {
+const src = E.ingest(grid);
+if (!src) return toast('No data found in that input', {tone: 'warn', icon: 'alert'});
+if (!src.rows.length) return toast('Only a header row was found', {tone: 'warn', icon: 'alert'});
+src.name = name || 'pasted-data';
+src.sheet = sheet || null;
+src.sheets = wb ? wb.SheetNames.filter(n => { const ref = wb.Sheets[n]['!ref']; return ref && ref !== 'A1'; }) : null;
+st.wb = wb || null;
+numMemo = new Map();
+ST.open(src);
+const r = ST.res();
+const R = st.doc.roles;
+const found = Object.keys(ROLES).filter(k => R[k] >= 0 && k !== 'value').map(k => ROLES[k].label.toLowerCase());
+toast(`${src.rows.length} rows · found ${found.join(', ') || 'no roles'} · ${r.stats.converted} to convert`, {icon: 'spark'});
+};
 
 function parseText(txt) {
 const lines = txt.replace(/\r/g, '').split('\n');
-if (lines.slice(0, 10).some(l => l.includes('\t'))) return lines.map(l => l.split('\t').map(c => c.replace(/^"(.*)"$/, '$1')));
+if (lines.slice(0, 10).some(l => l.includes('\t'))) return lines.map(l => l.split('\t').map(c => c.replace(/^"([\s\S]*)"$/, '$1').replace(/""/g, '"')));
 const wb = XLSX.read(txt, {type: 'string', raw: true});
 return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
 }
-
-function readFile(file) {
-state.fileName = file.name.replace(/\.[^.]+$/, '') || 'bugvert';
+App.loadText = (txt, name) => { if (!txt.trim()) return toast('Paste some rows first', {tone: 'warn', icon: 'alert'}); try { App.loadGrid(parseText(txt), name); } catch { toast('Could not read that text', {tone: 'warn', icon: 'alert'}); } };
+App.loadSheet = name => {
+if (!st.wb || !st.wb.Sheets[name]) return;
+App.loadGrid(XLSX.utils.sheet_to_json(st.wb.Sheets[name], {header: 1, raw: true, defval: ''}), st.src.name, st.wb, name);
+};
+App.readFile = file => {
+const base = file.name.replace(/\.[^.]+$/, '') || 'bugvert';
 const r = new FileReader();
-r.onerror = () => toast('Could not read this file');
-if (/\.(xlsx|xlsm|xls|ods)$/i.test(file.name)) {
+r.onerror = () => toast('Could not read this file', {tone: 'warn', icon: 'alert'});
+if (/\.(xlsx|xlsm|xlsb|xls|ods)$/i.test(file.name)) {
 r.onload = e => {
 try {
 const wb = XLSX.read(new Uint8Array(e.target.result), {type: 'array'});
-const name = wb.SheetNames.find(n => { const ref = wb.Sheets[n]['!ref']; return ref && ref !== 'A1'; }) || wb.SheetNames[0];
-loadGrid(XLSX.utils.sheet_to_json(wb.Sheets[name], {header: 1, raw: true, defval: ''}));
-} catch { toast('Could not read this file'); }
+const sheet = wb.SheetNames.find(n => { const ref = wb.Sheets[n]['!ref']; return ref && ref !== 'A1'; }) || wb.SheetNames[0];
+App.loadGrid(XLSX.utils.sheet_to_json(wb.Sheets[sheet], {header: 1, raw: true, defval: ''}), base, wb, sheet);
+} catch { toast('Could not read this file', {tone: 'warn', icon: 'alert'}); }
 };
 r.readAsArrayBuffer(file);
-} else { r.onload = e => loadGrid(parseText(e.target.result)); r.readAsText(file); }
-}
+} else { r.onload = e => App.loadText(e.target.result, base); r.readAsText(file); }
+};
+App.pickFile = () => $('#file-input').click();
 
 const SAMPLE = `الصرف\tالرقم\tالاسم\tالوحدة\tالرصيد\tالسعر\tقيمة المنصرف\tالمجموعة
 مجاني\t003 A\tAcetazolamide\t10 T\t\t17.1150\t0.0000\tنفسية وعصبية
@@ -406,71 +186,154 @@ const SAMPLE = `الصرف\tالرقم\tالاسم\tالوحدة\tالرصيد\t
 مجاني\t043 A\tOral Rehydration\t10 sach\t80\t15.0000\t1200.0000\tاطفال
 مجاني\t045 A\tVitamin D3\t30F\t50\t60.0000\t3000.0000\tعظام
 مجاني\t047 A\tOmeprazole 20\t14 C\t\t28.0000\t\tباطنة
+مجاني\t048 A\tOmeprazole 20\t14 C\t60\t28.0000\t1680.0000\tباطنة
 \t\t\t\t\t\t\t
-مجاني\t049 A\tParacetamol 500\t12 Pill\t100\t9.0000\t900.0000\tباطنة`;
+مجاني\t049 A\tParacetamol 500\t12 Pill\t100\t9.0000\t900.0000\tباطنة
+مجاني\t051 A\tCetirizine 10\t20 Lozng\t12\t16.0000\t192.0000\tباطنة`;
+App.loadSample = () => App.loadText(SAMPLE, 'sample-pharmacy');
 
-$('#browse-btn').onclick = e => { e.stopPropagation(); $('#file-input').click(); };
-$('#drop-zone').onclick = () => $('#file-input').click();
-$('#file-input').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0]); e.target.value = ''; };
-['dragenter', 'dragover'].forEach(ev => $('#drop-zone').addEventListener(ev, e => { e.preventDefault(); $('#drop-zone').classList.add('over'); }));
-['dragleave', 'drop'].forEach(ev => $('#drop-zone').addEventListener(ev, e => { e.preventDefault(); $('#drop-zone').classList.remove('over'); }));
-$('#drop-zone').addEventListener('drop', e => e.dataTransfer.files[0] && readFile(e.dataTransfer.files[0]));
-$('#parse-btn').onclick = () => { const t = $('#paste-input').value; if (!t.trim()) return toast('Paste some data first'); state.fileName = 'bugvert'; loadGrid(parseText(t)); };
-$('#paste-input').addEventListener('paste', () => setTimeout(() => $('#parse-btn').click(), 0));
-$('#sample-btn').onclick = () => { $('#paste-input').value = SAMPLE; $('#parse-btn').click(); };
-$('#reset-btn').onclick = () => location.reload();
-ROLES.forEach(k => $('#' + k + '-col').onchange = e => setRole(k, +e.target.value));
-$('#direction').onchange = e => { $('#pack-size-wrap').classList.toggle('hidden', e.target.value !== 'toPack'); run(); };
-['#pack-size', '#decimals'].forEach(s => $(s).oninput = () => state.output && run());
-$('#qty-toggle').onchange = run;
-$('#value-toggle').onchange = e => {
-if (e.target.checked && (state.cols.price < 0 || state.cols.qty < 0)) toast('Pick a price and a quantity column first');
-$('#value-basis-wrap').classList.toggle('hidden', !e.target.checked);
-run();
-};
-$('#value-basis').onchange = run;
-$('#row-filter').onchange = renderTable;
-document.querySelector('.export-bar').onclick = e => {
-const b = e.target.closest('[data-cols]');
-if (!b || !state.output) return;
-const m = b.dataset.cols;
-state.offCols = new Set(state.output.cols.filter(c => m === 'none' || (m === 'orig' && c.isNew) || (m === 'new' && !c.isNew)).map(c => c.key));
-renderTable();
-};
-$('#result-table').onchange = e => {
-const t = e.target;
-if (t.classList.contains('col-cb')) t.checked ? state.offCols.delete(t.dataset.key) : state.offCols.add(t.dataset.key);
-else if (t.classList.contains('row-cb')) t.checked ? state.offRows.delete(+t.dataset.src) : state.offRows.add(+t.dataset.src);
-else if (t.id === 'all-rows') visibleRows().forEach(d => t.checked ? state.offRows.delete(d.it.src) : state.offRows.add(d.it.src));
-else return;
-renderTable();
-};
-$('#merge-toggle').onchange = e => {
-let w = $('#merge-price-wrap');
-if (!w) {
-w = document.createElement('label'); w.id = 'merge-price-wrap';
-w.innerHTML = 'Merged price<select id="merge-price"><option value="weighted">Weighted by qty</option><option value="max">Highest</option><option value="min">Lowest</option><option value="first">First seen</option></select>';
-$('.settings-grid').appendChild(w);
-$('#merge-price').onchange = run;
+App.views.source = {
+render(main) {
+if (!st.src) return renderStart(main);
+const r = ST.res();
+const d = st.doc, src = st.src;
+const da = d.dirAuto || {packs: 0, singles: 0};
+const tot = da.packs + da.singles;
+main.innerHTML = `
+<section class="src-top">
+<article class="card src-file">
+<div class="sf-ic">${icon('file')}</div>
+<div class="sf-txt"><h2>${esc(src.name)}</h2><p>${src.rows.length} rows · ${src.headers.length} columns${src.sheet ? ' · sheet “' + esc(src.sheet) + '”' : ''}</p></div>
+<div class="sf-act">${src.sheets && src.sheets.length > 1 && st.wb ? '<button id="sheet-pick"></button>' : ''}<button class="btn ghost" id="replace-btn">${icon('upload')}Replace</button></div>
+</article>
+<article class="card src-dir">
+<header><h3>Direction</h3><span class="pill-note">${tot ? `${da.packs} pack${da.packs === 1 ? '' : 's'} · ${da.singles} single${da.singles === 1 ? '' : 's'} found` : 'no units read'}</span></header>
+<div class="dir-opts">
+<button class="dir-opt ${d.dir === 'toBase' ? 'on' : ''}" data-dir="toBase"><span class="do-ic">${icon('split')}</span><span class="do-t"><b>Pack → single</b><small>10 T @ 17.11 becomes 1 T @ 1.711</small></span>${da.dir === 'toBase' && tot ? '<em>detected</em>' : ''}</button>
+<button class="dir-opt ${d.dir === 'toPack' ? 'on' : ''}" data-dir="toPack"><span class="do-ic">${icon('merge')}</span><span class="do-t"><b>Single → pack</b><small>1 T @ 1.71 becomes a pack of N</small></span>${da.dir === 'toPack' && tot ? '<em>detected</em>' : ''}</button>
+</div>
+${d.dir === 'toPack' ? `<div class="dir-pack"><span>Default pack size</span><div id="src-pack"></div><small>Per unit and per item sizes live in Units and the Sheet.</small></div>` : ''}
+</article>
+</section>
+<section class="card src-cols">
+<header class="sec-head"><div><h3>Columns</h3><p>Picked from what's inside each column, not just the header. Tap a tag to change it.</p></div>
+<div class="role-legend">${Object.keys(ROLES).filter(k => k !== 'value').map(k => `<span class="rl ${d.roles[k] >= 0 ? '' : 'missing'}"><i class="role-dot r-${k}"></i>${ROLES[k].label}${d.roles[k] >= 0 ? '' : ' · missing'}</span>`).join('')}</div></header>
+<div class="col-cards">${src.headers.map((h, i) => colCard(h, i)).join('')}</div>
+</section>
+<section class="src-next">
+<div class="sn-stats">
+<span><b>${r.stats.rows}</b> rows ready</span><span><b>${r.stats.converted}</b> will convert</span>${r.stats.groups ? `<span><b>${r.stats.groups}</b> duplicate groups</span>` : ''}${r.stats.issues ? `<span class="warn"><b>${r.stats.issues}</b> need a look</span>` : ''}
+</div>
+<button class="btn primary lg" id="open-sheet">Open sheet ${icon('arrow')}</button>
+</section>`;
+$$('.dir-opt', main).forEach(b => b.onclick = () => b.dataset.dir !== d.dir && App.setDir(b.dataset.dir));
+if (d.dir === 'toPack') stepper($('#src-pack', main), {value: st.S.packSize, min: 1, max: 1000, onChange: v => ST.setS({packSize: v})});
+$('#replace-btn', main).onclick = App.pickFile;
+$('#open-sheet', main).onclick = () => App.go('sheet');
+const sp = $('#sheet-pick', main);
+if (sp) select(sp, {value: src.sheet, options: src.sheets.map(n => ({value: n, label: n, icon: 'sheet'})), onChange: async n => { if (n === src.sheet) return; if (st.undo.length && !await confirm({title: 'Switch sheet?', body: 'Edits made on this sheet will be lost.', ok: 'Switch'})) return; App.loadSheet(n); }});
+$$('.role-tag', main).forEach(b => b.onclick = () => roleMenu(b, +b.dataset.i));
 }
-w.classList.toggle('hidden', !e.target.checked);
-run();
 };
-$('#unit-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; const f = c.dataset.f; state.enabled.has(f) ? state.enabled.delete(f) : state.enabled.add(f); renderChips(); run(); };
-const canExport = () => {
-if (!state.output) return false;
-if (!exportCols().length) { toast('Tick at least one column'); return false; }
-if (!exportRows().length) { toast('No rows are ticked'); return false; }
-return true;
-};
-$('#copy-btn').onclick = () => canExport() && copy(toTSV());
-$('#download-btn').onclick = () => {
-if (!canExport()) return;
-const grid = exportGrid();
-const ws = XLSX.utils.aoa_to_sheet(grid);
-ws['!cols'] = grid[0].map((_, c) => ({wch: Math.min(40, Math.max(8, ...grid.slice(0, 200).map(r => String(r[c] ?? '').length + 2)))}));
-const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, ws, 'Converted');
-XLSX.writeFile(wb, state.fileName + '-bugvert.xlsx');
-};
+
+function colCard(h, i) {
+const d = st.doc;
+const role = App.roleOf(i);
+const ign = d.ignored.includes(i);
+const kind = d.kinds[i];
+const samples = [];
+for (const r of st.src.rows) { const v = E.clean(r[i]); if (v && !samples.includes(v)) samples.push(v); if (samples.length >= 3) break; }
+const tag = role ? `<i class="role-dot r-${role}"></i>${ROLES[role].label}` : ign ? `${icon('eyeOff')}Ignored` : (KIND[kind] || 'Info');
+const conf = role && d.conf[i] && d.roles[role] === i && st.det.roles[role] === i ? d.conf[i] : '';
+return `<article class="col-card ${role ? 'has-role r-' + role : ''} ${ign ? 'ignored' : ''}">
+<div class="cc-top"><span class="cc-h" title="${esc(h)}">${esc(h)}</span><button class="role-tag ${role ? 'r-' + role : ''}" data-i="${i}">${tag}${icon('chevron', 'sel-chev')}</button></div>
+<ul class="cc-samples">${samples.map(s => `<li>${esc(s)}</li>`).join('') || '<li class="muted">empty</li>'}</ul>
+<div class="cc-foot">${conf ? `<span class="conf c-${conf}">${conf === 'high' ? 'sure' : conf === 'medium' ? 'likely' : 'guess'}</span>` : ''}${ign && d.reasons[i] ? `<span class="cc-why">${esc(d.reasons[i])}</span>` : ''}</div>
+</article>`;
+}
+
+function roleMenu(anchor, i) {
+const cur = App.roleOf(i);
+const ign = st.doc.ignored.includes(i);
+const items = [{head: 'Use “' + st.src.headers[i] + '” as'}];
+Object.keys(ROLES).forEach(k => {
+const holder = st.doc.roles[k];
+items.push({label: ROLES[k].label, hint: holder >= 0 && holder !== i ? 'now “' + st.src.headers[holder] + '”' : ROLES[k].hint, icon: 'dot', active: cur === k, run: () => {
+const sw = ST.setRole(k, i);
+toast(sw ? `${ROLES[k].label} set · ${ROLES[sw].label} moved to “${st.src.headers[st.doc.roles[sw]]}”` : `${ROLES[k].label} → “${st.src.headers[i]}”`, {icon: 'check', action: {label: 'Undo', run: () => ST.undo()}});
+}});
+});
+items.push('-');
+items.push({label: 'Keep as info', hint: 'Shown, no role', icon: 'info', active: !cur && !ign, run: () => ST.setRole('other', i)});
+items.push({label: 'Ignore column', hint: 'Garbage, hidden by default', icon: 'eyeOff', active: ign, run: () => ST.setRole('ignore', i)});
+menu(anchor, items);
+}
+
+function renderStart(main) {
+const ses = ST.savedSession();
+main.innerHTML = `
+<section class="hero">
+<div class="hero-copy">
+<span class="eyebrow">${icon('spark')}bugvert 2</span>
+<h2>Drop a sheet.<br><em>Get every unit right.</em></h2>
+<p>Name, unit, price and quantity are found from what's in the cells. Packs and singles are rescaled, duplicates sorted out, and every row stays yours to change.</p>
+</div>
+<div class="hero-in">
+<button class="drop" id="drop-zone" type="button">
+<span class="drop-ic">${icon('upload')}</span>
+<b>Drop an Excel or CSV file</b>
+<small>or click to browse · .xlsx .xls .csv .tsv</small>
+</button>
+<div class="paste-card">
+<textarea id="paste-input" placeholder="…or paste rows straight from Excel" spellcheck="false" aria-label="Paste data"></textarea>
+<div class="pc-act"><button class="btn ghost" id="sample-btn">${icon('spark')}Try a sample</button><button class="btn primary" id="parse-btn">Analyze${icon('arrow')}</button></div>
+</div>
+</div>
+${ses ? `<button class="resume" id="resume-btn"><span class="rs-ic">${icon('reset')}</span><span><b>Continue “${esc(ses.src.name)}”</b><small>${ses.src.rows.length} rows · saved ${new Date(ses.ts).toLocaleString()}</small></span>${icon('arrow')}</button>` : ''}
+<ul class="hero-points">
+<li>${icon('brain')}<span><b>Reads content</b>Columns are found from their values, not their header names</span></li>
+<li>${icon('swap')}<span><b>Knows the direction</b>Packs to singles or singles to packs, picked for you</span></li>
+<li>${icon('edit')}<span><b>Control every row</b>Pack size, price and duplicates, row by row</span></li>
+</ul>
+</section>`;
+const dz = $('#drop-zone', main);
+dz.onclick = App.pickFile;
+['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+dz.addEventListener('drop', e => e.dataTransfer.files[0] && App.readFile(e.dataTransfer.files[0]));
+$('#parse-btn', main).onclick = () => App.loadText($('#paste-input', main).value);
+$('#paste-input', main).addEventListener('paste', () => setTimeout(() => App.loadText($('#paste-input', main).value), 0));
+$('#sample-btn', main).onclick = App.loadSample;
+if (ses) $('#resume-btn', main).onclick = () => { ST.resume(); App.go('sheet'); toast('Session restored', {icon: 'reset'}); };
+}
+
+function boot() {
+$('#file-input').onchange = e => { if (e.target.files[0]) App.readFile(e.target.files[0]); e.target.value = ''; };
+$('#dock').onclick = e => { const b = e.target.closest('.dock-b'); if (b && !b.disabled) App.go(b.dataset.tab); };
+$('#undo-btn').onclick = () => { const l = ST.undo(); if (l) toast('Undid ' + l.toLowerCase(), {icon: 'undo'}); };
+$('#redo-btn').onclick = () => { const l = ST.redo(); if (l) toast('Redid ' + l.toLowerCase(), {icon: 'redo'}); };
+$('#export-cta').onclick = () => App.go('export');
+$('#new-btn').onclick = async () => { if (await confirm({title: 'Start over?', body: 'This clears the current data and all edits. Settings and remembered packs are kept.', ok: 'Start over', danger: true})) { ST.close(); App.tab = 'source'; App.refresh('close'); } };
+$('#brand').onclick = () => App.go('source');
+document.addEventListener('keydown', e => {
+const typing = e.target.closest('input, textarea, [contenteditable]');
+const mod = e.ctrlKey || e.metaKey;
+if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); $(e.shiftKey ? '#redo-btn' : '#undo-btn').click(); }
+else if (mod && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); $('#redo-btn').click(); }
+});
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0] && !e.target.closest('#drop-zone')) App.readFile(e.dataTransfer.files[0]); });
+document.addEventListener('paste', e => {
+if (e.target.closest('input, textarea')) return;
+if (st.src && App.tab !== 'source') return;
+const t = e.clipboardData && e.clipboardData.getData('text');
+if (t && t.includes('\t')) { e.preventDefault(); App.loadText(t); }
+});
+document.body.dataset.density = st.S.density;
+renderHeader();
+renderDock();
+renderView(true);
+}
+App.boot = boot;
+return App;
 })();
