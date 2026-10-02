@@ -13,7 +13,7 @@ const tsrc = {};
 r.items.forEach(it => { if (!it.excluded && it.parsed) tsrc[it.tsrc] = (tsrc[it.tsrc] || 0) + 1; });
 main.innerHTML = `
 <section class="view-head">
-<div><h2>Units</h2><p>${toPack ? `Singles become packs. Remembered packs come first, then unit defaults, then <b>${st.S.packSize}</b>.` : 'Packs become singles. Turn a unit off to leave it as it is, or give it a different target.'}</p></div>
+<div><h2>Units</h2><p>${toPack ? `Singles become packs. Remembered packs come first, then sizes in item names${st.S.useName ? '' : ' (off)'}, then unit defaults, then <b>${st.S.packSize}</b>.` : 'Packs become singles. Turn a unit off to leave it as it is, or give it a different target.'}</p></div>
 <div class="vh-stats">${Object.entries(tsrc).filter(([k]) => A.TSRC[k]).map(([k, n]) => `<span class="mini t-${k}"><b>${n}</b>${esc(A.TSRC[k])}</span>`).join('')}</div>
 </section>
 <section class="unit-grid">${known.map(f => unitCard(f, r, toPack)).join('') || '<div class="empty-card">No known units yet. Check the unit column in Source.</div>'}</section>
@@ -114,12 +114,12 @@ const m = g.merged;
 const spread = g.spread * 100;
 return `<article class="dg ${g.mode === 'merge' ? 'is-merge' : 'is-keep'} ${g.review ? 'review' : ''}" data-k="${esc(g.key)}">
 <header>
-<div class="dg-t"><b>${esc(g.name)}</b><span><span class="upill sm">${esc(g.unit)}</span>${g.members.length} rows${g.conflict ? ` · <em class="warn">prices differ ${spread > 999 ? '>999' : spread.toFixed(0)}%</em>` : ' · prices agree'}${g.manual ? ' · merged by you' : ''}</span></div>
+<div class="dg-t"><b>${esc(g.name)}</b><span><span class="upill sm">${esc(g.unit)}</span>${g.members.length} rows${g.conflict ? ` · <em class="warn">prices differ ${spread > 999 ? '>999' : spread.toFixed(0)}%</em>` : ' · prices agree'}${g.fuzzy ? ' · <em class="warn">similar names</em>' : ''}${g.manual ? ' · merged by you' : ''}</span></div>
 <div class="dg-mode"></div>
 </header>
 <div class="dg-rows">${g.members.map(x => `<div class="dg-r ${g.mode === 'merge' && out.has(x.rid) ? 'out' : ''}" data-rid="${x.rid}">
 ${g.mode === 'merge' ? `<button class="ck sm ${out.has(x.rid) ? '' : 'on'}" data-a="inc" aria-label="Include in merge">${icon('check')}</button>` : '<span class="dg-dot"></span>'}
-<span class="dg-src">row ${x.rid + 2}</span><span class="dg-u">${esc(x.unitRaw)}</span>
+<span class="dg-src">row ${x.rid + 2}</span><span class="dg-u" title="${esc(x.name)}">${g.fuzzy ? esc(x.name) + ' · ' : ''}${esc(x.unitRaw)}</span>
 <span class="dg-p"><small>price</small>${esc(fmt(x.newPrice, 8) || '—')}</span><span class="dg-q"><small>qty</small>${esc(fmt(x.newQty, 8) || '—')}</span></div>`).join('')}</div>
 ${g.mode === 'merge' ? `<footer class="dg-f">
 <div class="dg-res">${icon('merge')}<span>${m ? `<b>${esc(fmt(m.newPrice, 8) || '—')}</b> price · <b>${esc(fmt(m.newQty, 8) || '—')}</b> qty` : 'Pick at least two rows'}</span></div>
@@ -320,10 +320,15 @@ const al = Object.entries(S.aliases);
 main.innerHTML = `
 <section class="view-head"><div><h2>Settings</h2><p>Saved in this browser and used for every file.</p></div><div class="vh-act"><button class="btn ghost" id="set-reset">${icon('reset')}Reset defaults</button></div></section>
 <section class="set-grid">
+<article class="card set" id="set-look"><h3>${icon('sun')}Appearance</h3>
+${row('Theme', 'System follows your device setting', '<div id="s-theme"></div>')}
+${row('Row density', '', '<div id="s-density"></div>')}
+</article>
 <article class="card set" id="set-conv"><h3>${icon('units')}Conversion</h3>
 ${row('Default pack size', 'Used for single → pack when nothing better is known', '<div id="s-pack"></div>')}
 ${row('Detect direction', 'Choose pack → single or single → pack from the data', sw(S.autoDir, 'data-k="autoDir"'))}
 ${row('Repack existing packs', 'In single → pack, also change rows that are already packs', sw(S.repack, 'data-k="repack"'))}
+${row('Pack size from item names', 'Reads “Panadol 24s”, “x 30” or “20 tabs” in single → pack', sw(S.useName, 'data-k="useName"'))}
 ${row('Remember packs per item', `Learns “Amoxicillin 500 = 8 C” from files you open · ${memN} remembered`, sw(S.useMemory, 'data-k="useMemory"'))}
 <div class="set-foot"><button class="link" id="mem-learn">${icon('brain')}Learn from this file</button>${memN ? `<button class="link danger" id="mem-clear">${icon('trash')}Forget all</button>` : ''}</div>
 </article>
@@ -344,6 +349,7 @@ ${row('Default action', '', '<div id="s-dmode"></div>')}
 ${row('Merged price', '', '<button id="s-mrule"></button>')}
 ${row('Price tolerance', 'Smart merges only when prices are this close', '<div id="s-tol"></div>')}
 ${row('Loose name match', 'Ignore case, spaces and punctuation', sw(S.dupLoose, 'data-k="dupLoose"'))}
+${row('Near-duplicate names', 'Match small typos, word order and mg/tab noise. Always sent to review', sw(S.dupFuzzy, 'data-k="dupFuzzy"'))}
 </article>
 <article class="card set" id="set-rows"><h3>${icon('sheet')}Rows & columns</h3>
 ${row('Auto-exclude empty rows', 'Rows with no name and no unit', sw(S.autoJunk, 'data-k="autoJunk"'))}
@@ -357,6 +363,8 @@ ${row('Columns for new files', '', '<button id="s-preset"></button>')}
 </section>`;
 const set = p => ST.setS(p);
 $$('.switch[data-k]', main).forEach(b => b.onclick = () => set({[b.dataset.k]: !S[b.dataset.k]}));
+seg($('#s-theme', main), {value: S.theme || 'system', options: A.THEMES, onChange: v => set({theme: v})});
+seg($('#s-density', main), {value: S.density, options: [{value: 'comfy', label: 'Comfy'}, {value: 'compact', label: 'Compact'}], onChange: v => { document.body.dataset.density = v; set({density: v}); }});
 stepper($('#s-pack', main), {value: S.packSize, min: 1, max: 1000, onChange: v => set({packSize: v})});
 stepper($('#s-pdec', main), {value: S.priceDec, min: 0, max: 8, onChange: v => set({priceDec: v})});
 stepper($('#s-qdec', main), {value: S.qtyDec, min: 0, max: 8, onChange: v => set({qtyDec: v})});

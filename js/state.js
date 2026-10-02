@@ -1,10 +1,10 @@
 window.Store = (() => {
 const DEFAULTS = {
-packSize: 10, autoDir: true, repack: false, useMemory: true,
+packSize: 10, autoDir: true, repack: false, useMemory: true, useName: true, theme: 'system',
 priceDec: 4, priceMode: 'nearest', qtyDec: 2, qtyMode: 'nearest',
 unitStyle: 'file', unitSpace: true, hideOne: false,
 nameTpl: '{name}',
-dupMode: 'smart', mergeRule: 'weighted', tolerance: 5, dupLoose: true,
+dupMode: 'smart', mergeRule: 'weighted', tolerance: 5, dupLoose: true, dupFuzzy: false,
 autoJunk: true, preset: 'clean', layout: null, density: 'comfy',
 fmt: 'xlsx', scope: 'view', aliases: {},
 labels: {'new.name': 'Name', 'new.unit': 'New unit', 'new.qty': 'New qty', 'new.price': 'New price', 'new.value': 'New value', 'new.factor': 'Factor'}
@@ -62,8 +62,8 @@ save(K.S, st.S);
 emit('settings');
 }
 function resetS() {
-const keepAliases = st.S.aliases;
-st.S = clone(DEFAULTS); st.S.aliases = keepAliases;
+const keepAliases = st.S.aliases, keepTheme = st.S.theme;
+st.S = clone(DEFAULTS); st.S.aliases = keepAliases; st.S.theme = keepTheme;
 save(K.S, st.S); emit('settings');
 }
 

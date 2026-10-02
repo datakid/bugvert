@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>bugvert 2 · smart unit & price converter</title>
 <link rel="icon" href="images/bugvert.jpg" type="image/jpeg">
+<meta name="color-scheme" content="light dark">
+<script>try{var t=(JSON.parse(localStorage.getItem('bugvert2.settings')||'{}')||{}).theme||'system';document.documentElement.dataset.theme=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -15,6 +17,7 @@
 <div id="file-slot"></div>
 <div id="dir-slot"></div>
 <span class="grow"></span>
+<button id="theme-btn" class="icon-btn theme-btn" aria-label="Theme" title="Theme"></button>
 <div id="hist" class="hist hidden">
 <button id="undo-btn" class="icon-btn" aria-label="Undo"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
 <button id="redo-btn" class="icon-btn" aria-label="Redo"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>

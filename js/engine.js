@@ -265,6 +265,56 @@ return Object.is(out, -0) ? 0 : out;
 
 const nameKey = (s, loose) => { let k = clean(s).toLowerCase(); if (loose) k = k.replace(/[^a-z0-9\u0600-\u06FF]+/g, ''); return k; };
 const memKey = s => nameKey(s, true);
+const NOISE = new Set(['mg','mcg','ug','g','gm','ml','iu','tab','tabs','tablet','tablets','cap','caps','capsule','capsules','film','coated','fc','f','t','c','s','x']);
+function fuzzyKey(s) {
+return clean(s).toLowerCase().replace(/(\d)([a-z\u0600-\u06FF])/g, '$1 $2').replace(/([a-z\u0600-\u06FF])(\d)/g, '$1 $2')
+.split(/[^a-z0-9.\u0600-\u06FF]+/).map(w => w.replace(/^\.+|\.+$/g, '')).filter(w => w && !NOISE.has(w))
+.map(w => w.length > 4 && w.endsWith('s') && !/\d/.test(w) ? w.slice(0, -1) : w).sort().join(' ');
+}
+function lev(a, b, max) {
+if (Math.abs(a.length - b.length) > max) return max + 1;
+let prev = Array.from({length: b.length + 1}, (_, i) => i);
+for (let i = 1; i <= a.length; i++) {
+const cur = [i]; let best = i;
+for (let j = 1; j <= b.length; j++) { cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); if (cur[j] < best) best = cur[j]; }
+if (best > max) return max + 1;
+prev = cur;
+}
+return prev[b.length];
+}
+function clusterFuzzy(gmap) {
+const buckets = new Map();
+[...gmap.keys()].filter(k => !k.startsWith('m:')).forEach(k => {
+const cut = k.lastIndexOf('|'), words = k.slice(0, cut).split(' ');
+const letters = words.filter(w => !/\d/.test(w)).join(' ');
+const b = k.slice(cut) + '|' + words.filter(w => /\d/.test(w)).join(' ') + '|' + letters.charAt(0);
+if (!buckets.has(b)) buckets.set(b, []);
+buckets.get(b).push({k, letters});
+});
+buckets.forEach(list => {
+if (list.length < 2 || list.length > 400) return;
+for (let i = 0; i < list.length; i++) {
+if (!gmap.has(list[i].k)) continue;
+for (let j = i + 1; j < list.length; j++) {
+const a = list[i], b = list[j];
+if (!gmap.has(b.k)) continue;
+const L = Math.min(a.letters.length, b.letters.length), tol = L >= 12 ? 2 : L >= 5 ? 1 : 0;
+if (tol && lev(a.letters, b.letters, tol) <= tol) { gmap.get(a.k).push(...gmap.get(b.k)); gmap.delete(b.k); }
+}
+}
+});
+gmap.forEach((ms, k) => { ms.sort((x, y) => x.rid - y.rid); ms.forEach(m => m.gkey = k); });
+}
+const PACK_WORDS = 'tabs?|tablets?|caps?|capsules?|pcs?|pieces?|sachets?|amps?|ampoules?|supps?|vials?|strips?|قرص|اقراص|أقراص|كبسولة|كبسولات|كبسول';
+const B = '(?:^|[\\s(\\-/])', A_ = '(?=$|[\\s)\\-/,])';
+const NAME_RX = [new RegExp(B + '(\\d{1,4})\\s*[\'’]?s' + A_, 'i'), new RegExp(B + '[x×*]\\s*(\\d{1,4})' + A_, 'i'), new RegExp(B + '(\\d{1,4})\\s*(?:' + PACK_WORDS + ')' + A_, 'i')];
+function namePack(name) {
+const s = clean(name); if (!s) return null;
+const mm = s.match(new RegExp(B + '(\\d{1,2})\\s*[x×*]\\s*(\\d{1,3})' + A_, 'i'));
+if (mm) { const n = +mm[1] * +mm[2]; if (+mm[1] > 0 && n > 1 && n <= 1000) return n; }
+for (const rx of NAME_RX) { const m = s.match(rx); if (m) { const n = +m[1]; if (n > 1 && n <= 1000) return n; } }
+return null;
+}
 const fmtN = n => String(+(+n).toFixed(4));
 
 function famTitle(id, f) {
@@ -341,7 +391,9 @@ else if (doc.dir === 'toBase') { target = rule.target || 1; tsrc = rule.target ?
 else if (p.count > 1 && !S.repack) { target = p.count; tsrc = 'already'; }
 else {
 const m = S.useMemory && b.name ? mem[memKey(b.name)] : null;
+const np = S.useName ? namePack(b.name) : null;
 if (m && m.family === p.family && m.count > 0) { target = m.count; tsrc = 'memory'; }
+else if (np) { target = np; tsrc = 'name'; }
 else if (rule.target) { target = rule.target; tsrc = 'unit'; }
 else { target = S.packSize; tsrc = 'default'; }
 }
@@ -371,14 +423,17 @@ converted: !!p && Math.abs(factor - 1) > 1e-12, flags, edited, excluded
 };
 });
 const gmap = new Map();
+const fz = !!S.dupFuzzy;
 items.forEach(it => {
 if (it.excluded || it.ov.solo) return;
 if (!it.name && !it.ov.mg) return;
-const k = it.ov.mg ? 'm:' + it.ov.mg : nameKey(it.name, S.dupLoose) + '|' + nameKey(it.newUnit, true);
+const nk = fz ? fuzzyKey(it.name) || nameKey(it.name, S.dupLoose) : nameKey(it.name, S.dupLoose);
+const k = it.ov.mg ? 'm:' + it.ov.mg : nk + '|' + nameKey(it.newUnit, true);
 it.gkey = k;
 if (!gmap.has(k)) gmap.set(k, []);
 gmap.get(k).push(it);
 });
+if (fz) clusterFuzzy(gmap);
 const groups = [];
 const mergedBy = new Map();
 gmap.forEach((members, k) => {
@@ -389,13 +444,14 @@ const lo = prices.length ? Math.min(...prices) : 0, hi = prices.length ? Math.ma
 const spread = prices.length > 1 ? (hi - lo) / Math.max(Math.abs(lo), 1e-9) : 0;
 const conflict = spread * 100 > S.tolerance + 1e-9;
 const manual = k.startsWith('m:');
-const autoMode = manual ? 'merge' : S.dupMode === 'smart' ? (conflict ? 'keep' : 'merge') : S.dupMode;
+const fuzzy = !manual && new Set(members.map(m => nameKey(m.name, S.dupLoose))).size > 1;
+const autoMode = manual ? 'merge' : S.dupMode === 'smart' ? (conflict || fuzzy ? 'keep' : 'merge') : S.dupMode;
 const mode = g.mode || autoMode;
 const outSet = new Set(g.out || []);
 const inc = members.filter(m => !outSet.has(m.rid));
 const rule = g.rule || S.mergeRule;
-const review = conflict && !g.mode && !manual;
-const grp = {key: k, name: members[0].name, unit: members[0].newUnit, members, inc, mode, auto: !g.mode, conflict, review, spread, rule, lo, hi, ov: g, manual};
+const review = (conflict || fuzzy) && !g.mode && !manual;
+const grp = {key: k, name: members[0].name, unit: members[0].newUnit, members, inc, mode, auto: !g.mode, conflict, review, spread, rule, lo, hi, ov: g, manual, fuzzy};
 groups.push(grp);
 if (mode === 'merge' && inc.length >= 2) {
 const qs = inc.map(m => m.newQty).filter(v => v != null);
@@ -566,5 +622,5 @@ case 'nin': { const set = new Set((val || []).map(String)); return v => !set.has
 return () => true;
 }
 
-return {ALIASES, FAM, ISSUE_FLAGS, NEW_COLS, NUM_NEW, clean, parseNum, isNumCell, parseUnit, buildDict, ingest, detect, detectDirection, compute, value, exportCell, buildColumns, viewItems, ruleTest, rnd, nameKey, memKey, famTitle, fmtN};
+return {ALIASES, FAM, ISSUE_FLAGS, NEW_COLS, NUM_NEW, clean, parseNum, isNumCell, parseUnit, buildDict, ingest, detect, detectDirection, compute, value, exportCell, buildColumns, viewItems, ruleTest, rnd, nameKey, memKey, famTitle, fmtN, namePack, fuzzyKey};
 })();

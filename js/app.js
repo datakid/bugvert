@@ -101,7 +101,23 @@ if (switched) { main.classList.remove('enter'); void main.offsetWidth; main.clas
 v.render(main, switched);
 }
 
+const THEMES = [{value: 'system', label: 'System', icon: 'monitor'}, {value: 'light', label: 'Light', icon: 'sun'}, {value: 'dark', label: 'Dark', icon: 'moon'}];
+App.THEMES = THEMES;
+const darkMq = matchMedia('(prefers-color-scheme: dark)');
+App.applyTheme = () => {
+const t = THEMES.some(x => x.value === st.S.theme) ? st.S.theme : 'system';
+const dark = t === 'dark' || (t === 'system' && darkMq.matches);
+document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+document.body.dataset.density = st.S.density;
+const b = $('#theme-btn');
+if (b) { const cur = THEMES.find(x => x.value === t); b.innerHTML = icon(cur.icon); b.title = 'Theme: ' + cur.label; }
+};
+function themeMenu(anchor) {
+menu(anchor, [{head: 'Theme'}].concat(THEMES.map(x => ({label: x.label, icon: x.icon, active: (st.S.theme || 'system') === x.value, run: () => ST.setS({theme: x.value})}))));
+}
+
 App.refresh = what => {
+App.applyTheme();
 renderHeader();
 renderDock();
 const v = App.views[App.tab];
@@ -139,7 +155,24 @@ const wb = XLSX.read(txt, {type: 'string', raw: true});
 return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
 }
 App.loadText = (txt, name) => { if (!txt.trim()) return toast('Paste some rows first', {tone: 'warn', icon: 'alert'}); try { App.loadGrid(parseText(txt), name); } catch { toast('Could not read that text', {tone: 'warn', icon: 'alert'}); } };
+App.ALL_SHEETS = '__all__';
+App.loadAllSheets = () => {
+if (!st.wb || !st.src || !st.src.sheets) return;
+const heads = [], parts = [];
+st.src.sheets.forEach(n => {
+const s = E.ingest(XLSX.utils.sheet_to_json(st.wb.Sheets[n], {header: 1, raw: true, defval: ''}));
+if (!s || !s.rows.length) return;
+s.headers.forEach(h => { if (!heads.includes(h)) heads.push(h); });
+parts.push({n, s});
+});
+if (parts.length < 2) return toast('Only one sheet has data', {tone: 'warn', icon: 'alert'});
+const tag = heads.includes('Sheet') ? 'Source sheet' : 'Sheet';
+const grid = [heads.concat(tag)];
+parts.forEach(({n, s}) => { const idx = heads.map(h => s.headers.indexOf(h)); s.rows.forEach(r => grid.push(idx.map(i => i < 0 ? '' : r[i]).concat(n))); });
+App.loadGrid(grid, st.src.name, st.wb, App.ALL_SHEETS);
+};
 App.loadSheet = name => {
+if (name === App.ALL_SHEETS) return App.loadAllSheets();
 if (!st.wb || !st.wb.Sheets[name]) return;
 App.loadGrid(XLSX.utils.sheet_to_json(st.wb.Sheets[name], {header: 1, raw: true, defval: ''}), st.src.name, st.wb, name);
 };
@@ -203,7 +236,7 @@ main.innerHTML = `
 <section class="src-top">
 <article class="card src-file">
 <div class="sf-ic">${icon('file')}</div>
-<div class="sf-txt"><h2>${esc(src.name)}</h2><p>${src.rows.length} rows · ${src.headers.length} columns${src.sheet ? ' · sheet “' + esc(src.sheet) + '”' : ''}</p></div>
+<div class="sf-txt"><h2>${esc(src.name)}</h2><p>${src.rows.length} rows · ${src.headers.length} columns${src.sheet === App.ALL_SHEETS ? ' · ' + (src.sheets || []).length + ' sheets merged' : src.sheet ? ' · sheet “' + esc(src.sheet) + '”' : ''}</p></div>
 <div class="sf-act">${src.sheets && src.sheets.length > 1 && st.wb ? '<button id="sheet-pick"></button>' : ''}<button class="btn ghost" id="replace-btn">${icon('upload')}Replace</button></div>
 </article>
 <article class="card src-dir">
@@ -231,7 +264,7 @@ if (d.dir === 'toPack') stepper($('#src-pack', main), {value: st.S.packSize, min
 $('#replace-btn', main).onclick = App.pickFile;
 $('#open-sheet', main).onclick = () => App.go('sheet');
 const sp = $('#sheet-pick', main);
-if (sp) select(sp, {value: src.sheet, options: src.sheets.map(n => ({value: n, label: n, icon: 'sheet'})), onChange: async n => { if (n === src.sheet) return; if (st.undo.length && !await confirm({title: 'Switch sheet?', body: 'Edits made on this sheet will be lost.', ok: 'Switch'})) return; App.loadSheet(n); }});
+if (sp) select(sp, {value: src.sheet, options: src.sheets.map(n => ({value: n, label: n, icon: 'sheet'})).concat([{value: App.ALL_SHEETS, label: 'All sheets merged', hint: 'Rows stacked, columns matched by header', icon: 'layers'}]), onChange: async n => { if (n === src.sheet) return; if (st.undo.length && !await confirm({title: 'Switch sheet?', body: 'Edits made on this sheet will be lost.', ok: 'Switch'})) return; App.loadSheet(n); }});
 $$('.role-tag', main).forEach(b => b.onclick = () => roleMenu(b, +b.dataset.i));
 }
 };
@@ -315,6 +348,10 @@ $('#redo-btn').onclick = () => { const l = ST.redo(); if (l) toast('Redid ' + l.
 $('#export-cta').onclick = () => App.go('export');
 $('#new-btn').onclick = async () => { if (await confirm({title: 'Start over?', body: 'This clears the current data and all edits. Settings and remembered packs are kept.', ok: 'Start over', danger: true})) { ST.close(); App.tab = 'source'; App.refresh('close'); } };
 $('#brand').onclick = () => App.go('source');
+$('#theme-btn').onclick = e => themeMenu(e.currentTarget);
+const onScheme = () => { if ((st.S.theme || 'system') === 'system') App.applyTheme(); };
+darkMq.addEventListener ? darkMq.addEventListener('change', onScheme) : darkMq.addListener(onScheme);
+App.applyTheme();
 document.addEventListener('keydown', e => {
 const typing = e.target.closest('input, textarea, [contenteditable]');
 const mod = e.ctrlKey || e.metaKey;

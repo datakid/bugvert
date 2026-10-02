@@ -31,11 +31,13 @@ Export calls `Store.fresh()`, which saves any edit still in progress and then re
 - **Direction:** found automatically from packs vs singles and switchable from the header.
 - **Units:** 15 families, measure words (ml, mg) recognised and never converted, plus a user dictionary for unknown words.
 - **Pack size, three levels:** per row (popover, bulk action, keyboard), per unit (Units tab), and default (Settings). Pack memory learns `item → pack size` from pack files and reuses it for single → pack.
+- **Pack size from item names:** in single → pack, names like `Panadol 24s`, `Brufen x 30`, `Cipro 20 tabs` or `3x10` set the pack (priority: row → memory → name → unit default → default). Toggle in Settings.
 - **Duplicates**
   - Smart mode merges automatically when prices are within the tolerance and flags the rest for review.
   - Per group: merge or keep separate, include or exclude members, and choose the price rule.
   - Per row: take it out of a merge, or leave it out of duplicate matching.
   - Manual merge of any selected rows.
+  - Optional near-duplicate matching (Settings): ignores word order and mg/tab noise and allows small typos inside the same strength and unit. Fuzzy groups are always kept separate and flagged for review until you decide.
 - **Sheet**
   - Quick views: all, needs a look (with issue sub-chips), converted, unchanged, edited, duplicates, excluded.
   - Search.
@@ -44,6 +46,8 @@ Export calls `Store.fresh()`, which saves any edit still in progress and then re
   - Row inspector, row menu, shift-click range select, floating bulk bar.
 - **Columns:** presets (Clean / Side by side / Everything / My default), toggle, rename, drag reorder, and a new-name template (`{name} {unit}`).
 - **Settings:** rounding decimals and mode (nearest/up/down) for price and quantity separately, unit label style, duplicate defaults, auto-exclude empty rows.
+- **Theme:** System (default, follows the OS live), Light, Dark. Header button or Settings → Appearance. Applied before first paint so nothing flashes.
+- **Multi-sheet merge:** for workbooks with several sheets, pick "All sheets merged" in Source. Rows are stacked, columns matched by header, and a `Sheet` column records the origin.
 - **Export:** xlsx or csv of exactly the visible columns, for the current view or all rows. Numbers are real numbers and empty cells are truly empty.
 - **History and saving:** undo/redo for every edit (Ctrl+Z / Ctrl+Shift+Z), session autosave and resume.
 
@@ -51,12 +55,15 @@ Export calls `Store.fresh()`, which saves any edit still in progress and then re
 - `index.html` (no parameters). Add a file by dropping it anywhere, pasting anywhere on the start screen, or using the drop zone.
 
 ## Storage
-localStorage only: `bugvert2.settings`, `bugvert2.memory`, `bugvert2.session`. No server, no tables.
+localStorage only: `bugvert2.settings` (includes `theme`, `useName`, `dupFuzzy`), `bugvert2.memory`, `bugvert2.session`. No server, no tables.
 
 ## Not yet implemented
-- Pack size read from item names (e.g. "Panadol 24s")
-- Fuzzy or near-duplicate name matching
-- Multi-sheet merge in a single session
+- Choosing which sheets to merge (currently all non-empty sheets)
+- Column mapping between sheets with different header names
+
+## Next steps
+- Sheet picker checklist for merging
+- Header synonym mapping across sheets
 
 ## Files
 `index.html`, `css/style.css`, `js/{engine,ui,state,app,sheet,views}.js`, `js/xlsx.full.min.js`, `images/bugvert.jpg`.
