@@ -152,13 +152,17 @@ em{font-style:normal}
 #view[data-view="sheet"]>section{max-width:none;width:100%}
 
 #dock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;display:flex;gap:2px;padding:6px;background:rgba(42,33,29,.92);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:var(--pill);box-shadow:var(--sh3)}
-.dock-b{position:relative;z-index:1;display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;border-radius:var(--pill);color:#CDBFB4;font-weight:600;font-size:13px;transition:color .2s,transform .15s var(--ease)}
-.dock-b:hover:not(:disabled){color:#fff}
+.dock-b{position:relative;z-index:1;display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;border-radius:var(--pill);color:#CDBFB4;font-weight:600;font-size:13px;flex:none;transition:color .28s var(--ease) .04s,background .2s,transform .18s var(--ease);-webkit-tap-highlight-color:transparent}
+.dock-b:hover:not(:disabled):not(.on){color:#fff;background:rgba(255,255,255,.06)}
+.dock-b:focus-visible{outline-offset:-2px}
+.dock-b.on .ic{animation:dock-pop .45s var(--spring)}
+@keyframes dock-pop{0%{transform:scale(.8)}60%{transform:scale(1.12)}100%{transform:none}}
 .dock-b:active:not(:disabled){transform:scale(.93)}
 .dock-b.on{color:#2A211D}
 .dock-b:disabled{opacity:.3}
 .dock-badge{min-width:18px;height:18px;padding:0 5px;border-radius:var(--pill);background:var(--amber);color:#fff;font-size:10.5px;display:grid;place-items:center;line-height:1}
-.dock-glider{position:absolute;top:6px;left:0;height:44px;border-radius:var(--pill);background:linear-gradient(180deg,#FFFBF7,#F4E9DF);box-shadow:0 4px 14px -4px rgba(0,0,0,.4);transition:transform .42s var(--spring),width .42s var(--spring)}
+.dock-glider{position:absolute;top:6px;left:0;height:44px;border-radius:var(--pill);background:linear-gradient(180deg,#FFFBF7,#F4E9DF);box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 4px 14px -4px rgba(0,0,0,.45);opacity:0;transition:opacity .2s;will-change:transform,width;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.dock-b.on .ic{animation:none}.dock-b{transition:none}}
 
 #toast{position:fixed;left:50%;bottom:calc(var(--dockh) + 34px);transform:translate(-50%,16px) scale(.96);opacity:0;pointer-events:none;z-index:60;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 10px;background:var(--inv);color:#fff;border-radius:var(--pill);box-shadow:var(--sh3);transition:.3s var(--spring);max-width:min(620px,92vw)}
 #toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}

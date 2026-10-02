@@ -77,21 +77,49 @@ $('#new-btn').classList.toggle('hidden', !loaded);
 if (loaded) $('#file-chip').onclick = () => App.go('source');
 }
 
+const reduceMq = matchMedia('(prefers-reduced-motion: reduce)');
+let gPos = null, gAnim = null;
+function moveGlider(animate) {
+const dock = $('#dock'), on = $('.dock-b.on', dock), g = $('.dock-glider', dock);
+if (!g) return;
+if (!on || !on.offsetWidth) { g.style.opacity = on ? g.style.opacity : '0'; if (!on) gPos = null; return; }
+const to = {x: on.offsetLeft, w: on.offsetWidth};
+let cur = gPos;
+if (gPos && gAnim) { const dr = dock.getBoundingClientRect(), gr = g.getBoundingClientRect(); cur = {x: gr.left - dr.left - dock.clientLeft + dock.scrollLeft, w: gr.width}; }
+if (gAnim) { gAnim.cancel(); gAnim = null; }
+g.style.width = to.w + 'px';
+g.style.transform = `translateX(${to.x}px)`;
+g.style.opacity = '1';
+gPos = to;
+if (dock.scrollWidth > dock.clientWidth + 1) dock.scrollTo({left: to.x - (dock.clientWidth - to.w) / 2, behavior: animate && !reduceMq.matches ? 'smooth' : 'auto'});
+if (!animate || !cur || reduceMq.matches || !g.animate || (Math.abs(cur.x - to.x) < .5 && Math.abs(cur.w - to.w) < .5)) return;
+const L0 = cur.x, R0 = cur.x + cur.w, L1 = to.x, R1 = to.x + to.w, right = L1 > L0;
+const lerp = (a, b, t) => a + (b - a) * t;
+const mL = lerp(L0, L1, right ? .3 : .78), mR = lerp(R0, R1, right ? .78 : .3);
+const far = Math.abs(L1 - L0) > 4;
+gAnim = g.animate([
+{transform: `translateX(${L0}px) scaleY(1)`, width: cur.w + 'px', easing: 'cubic-bezier(.45,0,.55,1)'},
+{offset: .48, transform: `translateX(${mL}px) scaleY(${far ? .9 : 1})`, width: (mR - mL) + 'px', easing: 'cubic-bezier(.22,1.25,.4,1)'},
+{transform: `translateX(${L1}px) scaleY(1)`, width: to.w + 'px'}
+], {duration: Math.min(560, 340 + Math.abs(L1 - L0) * .25)});
+gAnim.onfinish = () => { gAnim = null; };
+}
 function renderDock() {
 const dock = $('#dock');
+if (!$('.dock-glider', dock)) dock.innerHTML = '<span class="dock-glider" aria-hidden="true"></span>' + TABS.map(t => `<button class="dock-b" data-tab="${t.id}" role="tab" aria-label="${t.label}">${icon(t.icon)}<span class="dock-l">${t.label}</span><b class="dock-badge hidden"></b></button>`).join('');
 const r = ST.res();
 const badge = {sheet: r && r.stats.issues, units: r && r.stats.unknown, dups: r && r.stats.review};
-dock.innerHTML = TABS.map(t => {
-const dis = t.data && !st.src;
-const b = badge[t.id];
-return `<button class="dock-b ${App.tab === t.id ? 'on' : ''}" data-tab="${t.id}" ${dis ? 'disabled' : ''} role="tab" aria-selected="${App.tab === t.id}">${icon(t.icon)}<span class="dock-l">${t.label}</span>${b ? `<b class="dock-badge">${b > 99 ? '99+' : b}</b>` : ''}</button>`;
-}).join('') + '<span class="dock-glider"></span>';
-requestAnimationFrame(() => {
-const on = $('.dock-b.on', dock), g = $('.dock-glider', dock);
-if (!on) return;
-g.style.width = on.offsetWidth + 'px';
-g.style.transform = `translateX(${on.offsetLeft}px)`;
+$$('.dock-b', dock).forEach(b => {
+const t = TABS.find(x => x.id === b.dataset.tab), on = App.tab === t.id, n = badge[t.id];
+b.classList.toggle('on', on);
+b.setAttribute('aria-selected', on);
+b.tabIndex = on ? 0 : -1;
+b.disabled = !!(t.data && !st.src);
+const bd = $('.dock-badge', b);
+bd.classList.toggle('hidden', !n);
+bd.textContent = n ? (n > 99 ? '99+' : n) : '';
 });
+moveGlider(true);
 }
 
 function renderView(switched) {
@@ -343,6 +371,16 @@ if (ses) $('#resume-btn', main).onclick = () => { ST.resume(); App.go('sheet'); 
 function boot() {
 $('#file-input').onchange = e => { if (e.target.files[0]) App.readFile(e.target.files[0]); e.target.value = ''; };
 $('#dock').onclick = e => { const b = e.target.closest('.dock-b'); if (b && !b.disabled) App.go(b.dataset.tab); };
+$('#dock').onkeydown = e => {
+if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+const bs = $$('.dock-b:not(:disabled)', $('#dock')), i = bs.indexOf(document.activeElement);
+if (i < 0) return;
+e.preventDefault();
+const n = bs[(i + (e.key === 'ArrowRight' ? 1 : -1) + bs.length) % bs.length];
+n.focus(); App.go(n.dataset.tab);
+};
+addEventListener('resize', () => moveGlider(false));
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => moveGlider(false));
 $('#undo-btn').onclick = () => { const l = ST.undo(); if (l) toast('Undid ' + l.toLowerCase(), {icon: 'undo'}); };
 $('#redo-btn').onclick = () => { const l = ST.redo(); if (l) toast('Redid ' + l.toLowerCase(), {icon: 'redo'}); };
 $('#export-cta').onclick = () => App.go('export');

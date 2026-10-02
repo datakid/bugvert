@@ -31,7 +31,11 @@ Export calls `Store.fresh()`, which saves any edit still in progress and then re
 - **Direction:** found automatically from packs vs singles and switchable from the header.
 - **Units:** 15 families, measure words (ml, mg) recognised and never converted, plus a user dictionary for unknown words.
 - **Pack size, three levels:** per row (popover, bulk action, keyboard), per unit (Units tab), and default (Settings). Pack memory learns `item → pack size` from pack files and reuses it for single → pack.
-- **Pack size from item names:** in single → pack, names like `Panadol 24s`, `Brufen x 30`, `Cipro 20 tabs` or `3x10` set the pack (priority: row → memory → name → unit default → default). Toggle in Settings.
+- **Pack size from item names:** in single → pack, names like `Panadol 24s`, `Brufen x 30`, `Cipro 20 tabs`, `2x10`, `Box of 30`, `24 قرص` set the pack (priority: row → memory → name → unit default → default). Toggle in Settings. Rules:
+  - Only used when the row's unit is a single (`1 T`, `Tab`) of a countable family. A unit with a count (`10 T`) always wins, and bottles, tubes and other non-countables never read names.
+  - Strengths are removed before matching: a number touching or followed by mg, mcg, g, ml, IU, units, %, mmol, مجم, مل… (`500mg`, `500 mg`, `100u/ml`, `120mg/5ml`, `875/125mg`, `500+125mg`), ratios like `875/125`, and decimals.
+  - A plain number with no pack marker (`Amox 500`, `Cetirizine 10`) is never a pack size.
+  - If the name gives two different pack sizes (`24s 12s`), nothing is used.
 - **Duplicates**
   - Smart mode merges automatically when prices are within the tolerance and flags the rest for review.
   - Per group: merge or keep separate, include or exclude members, and choose the price rule.

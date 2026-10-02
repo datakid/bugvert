@@ -305,15 +305,33 @@ if (tol && lev(a.letters, b.letters, tol) <= tol) { gmap.get(a.k).push(...gmap.g
 });
 gmap.forEach((ms, k) => { ms.sort((x, y) => x.rid - y.rid); ms.forEach(m => m.gkey = k); });
 }
-const PACK_WORDS = 'tabs?|tablets?|caps?|capsules?|pcs?|pieces?|sachets?|amps?|ampoules?|supps?|vials?|strips?|قرص|اقراص|أقراص|كبسولة|كبسولات|كبسول';
-const B = '(?:^|[\\s(\\-/])', A_ = '(?=$|[\\s)\\-/,])';
-const NAME_RX = [new RegExp(B + '(\\d{1,4})\\s*[\'’]?s' + A_, 'i'), new RegExp(B + '[x×*]\\s*(\\d{1,4})' + A_, 'i'), new RegExp(B + '(\\d{1,4})\\s*(?:' + PACK_WORDS + ')' + A_, 'i')];
+const LET = 'a-z\\u0600-\\u06FF';
+const MEAS = '(?:mg|mcg|µg|ug|g|gm|gr|kg|ml|l|cc|iu|i\\.u|u|units?|mmol|meq|%|مجم|ملجم|مج|ملغ|مل|جم|جرام|غ|وحدة|وحدات)';
+const STRENGTH_RX = new RegExp('\\d+(?:\\.\\d+)?(?:\\s*[/+]\\s*\\d+(?:\\.\\d+)?)*\\s*' + MEAS + '(?:\\s*/\\s*\\d*(?:\\.\\d+)?\\s*' + MEAS + ')?(?![' + LET + '])', 'gi');
+const B = '(?:^|[\\s(\\-/,])', A_ = '(?=$|[\\s)\\-/,.])';
+const PLURAL = 'tabs|tablets|caps|capsules|softgels|sachets|amps|ampoules|vials|supps|suppositories|pcs|pieces|strips|lozenges|اقراص|أقراص|كبسولات|اكياس|أكياس|امبولات|أمبولات|لبوسات';
+const AR_SING = 'قرص|كبسولة|كبسول|كيس|امبول|أمبول|لبوس';
+const BOX = 'pack|box|pk|strip|carton|علبة|عبوة|شريط';
+const NAME_RX = [
+[new RegExp(B + '(\\d{1,2})\\s*[x×*]\\s*(\\d{1,3})' + A_, 'gi'), m => +m[1] * +m[2]],
+[new RegExp(B + '[x×*]\\s*(\\d{1,4})' + A_, 'gi'), m => +m[1]],
+[new RegExp(B + "(\\d{1,4})\\s?['’]?s" + A_, 'gi'), m => +m[1]],
+[new RegExp(B + '(\\d{1,4})\\s*(?:' + PLURAL + ')' + A_, 'gi'), m => +m[1]],
+[new RegExp(B + '(\\d{1,3})\\s*(?:' + AR_SING + ')' + A_, 'gi'), m => +m[1] >= 11 && +m[1] <= 100 ? +m[1] : null],
+[new RegExp('(?:' + BOX + ')\\s*(?:of|:|-)?\\s*(\\d{1,4})' + A_, 'gi'), m => +m[1]],
+[new RegExp(B + '(\\d{1,4})\\s*(?:/|per\\s+)(?:' + BOX + ')' + A_, 'gi'), m => +m[1]]
+];
 function namePack(name) {
-const s = clean(name); if (!s) return null;
-const mm = s.match(new RegExp(B + '(\\d{1,2})\\s*[x×*]\\s*(\\d{1,3})' + A_, 'i'));
-if (mm) { const n = +mm[1] * +mm[2]; if (+mm[1] > 0 && n > 1 && n <= 1000) return n; }
-for (const rx of NAME_RX) { const m = s.match(rx); if (m) { const n = +m[1]; if (n > 1 && n <= 1000) return n; } }
-return null;
+let s = clean(name).toLowerCase(); if (!s) return null;
+s = ' ' + s.replace(STRENGTH_RX, ' ').replace(/\d+(?:\.\d+)?\s*[/:]\s*\d+(?:\.\d+)?/g, ' ').replace(/\d*\.\d+/g, ' ') + ' ';
+const found = new Set();
+s = s.replace(new RegExp(B + '(\\d{1,2})\\s*[x×*]\\s*(\\d{1,3})' + A_, 'gi'), (all, a, b) => {
+const n = +a * +b;
+if (+a >= 1 && +a <= 10) { if (n > 1 && n <= 1000) found.add(n); return ' '; }
+return ' x ' + b + ' ';
+});
+NAME_RX.slice(1).forEach(([rx, f]) => { for (const m of s.matchAll(rx)) { const n = f(m); if (n > 1 && n <= 1000) found.add(n); } });
+return found.size === 1 ? [...found][0] : null;
 }
 const fmtN = n => String(+(+n).toFixed(4));
 
@@ -391,7 +409,7 @@ else if (doc.dir === 'toBase') { target = rule.target || 1; tsrc = rule.target ?
 else if (p.count > 1 && !S.repack) { target = p.count; tsrc = 'already'; }
 else {
 const m = S.useMemory && b.name ? mem[memKey(b.name)] : null;
-const np = S.useName ? namePack(b.name) : null;
+const np = S.useName && p.count === 1 && PACKABLE.has(p.family) ? namePack(b.name) : null;
 if (m && m.family === p.family && m.count > 0) { target = m.count; tsrc = 'memory'; }
 else if (np) { target = np; tsrc = 'name'; }
 else if (rule.target) { target = rule.target; tsrc = 'unit'; }
