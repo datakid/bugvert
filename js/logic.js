@@ -66,18 +66,22 @@ if (it.flags.includes('partial')) parts.push('The new quantity is not a whole nu
 return parts.join(' ');
 }
 
-function priceCalc(it, S) {
+const decs = (res, k, S) => res && res.round ? res.round[k].d : (k === 'price' ? S.priceDec : S.qtyDec) | 0;
+function priceCalc(it, S, res) {
 if (it.oldPrice == null) return '';
 if (it.ov && it.ov.price != null) return 'typed';
 if (Math.abs(it.factor - 1) < 1e-12) return 'unchanged';
-return fmtNum(it.oldPrice, S.priceDec) + ' × ' + E.fmtN(it.factor) + ' = ' + fmtNum(it.oldPrice * it.factor, S.priceDec) + ' → ' + S.priceDec + ' dp ' + S.priceMode;
+const d = decs(res, 'price', S);
+return fmtNum(it.oldPrice, d) + ' × ' + E.fmtN(it.factor) + ' = ' + fmtNum(it.oldPrice * it.factor, d) + ' → ' + d + ' dp ' + S.priceMode;
 }
-function qtyCalc(it, S) {
+function qtyCalc(it, S, res) {
 if (it.oldQty == null) return '';
 if (it.ov && it.ov.qty != null) return 'typed';
 if (Math.abs(it.factor - 1) < 1e-12) return 'unchanged';
-return fmtNum(it.oldQty, S.qtyDec) + ' ÷ ' + E.fmtN(it.factor) + ' = ' + fmtNum(it.oldQty / it.factor, S.qtyDec) + ' → ' + S.qtyDec + ' dp ' + S.qtyMode;
+const d = decs(res, 'qty', S);
+return fmtNum(it.oldQty, d) + ' ÷ ' + E.fmtN(it.factor) + ' = ' + fmtNum(it.oldQty / it.factor, d) + ' → ' + d + ' dp ' + S.qtyMode;
 }
+const roundText = (res, k, S) => { const r = res && res.round && res.round[k]; if (!r) return ''; return r.auto ? r.d + ' decimals (auto: file uses ' + r.src + ', results need ' + r.d + ')' : r.d + ' decimals (fixed)'; };
 function dupText(it, res) {
 const g = it.group;
 if (!g) return '';
@@ -99,7 +103,7 @@ const mg = x.kind === 'merged' ? x : null;
 rowsOut.push([
 it.rid + 2, it.name || null, it.unitRaw || null, readAs(it) || null, READ[it.rs.src] || null, clue(it.rs) || null,
 it.conf || null, TSRC[it.tsrc] || null, it.newUnit || null, it.parsed ? E.rnd(it.factor, 6) : null,
-it.oldPrice, priceCalc(it, S) || null, it.newPrice, it.oldQty, qtyCalc(it, S) || null, it.newQty,
+it.oldPrice, priceCalc(it, S, res) || null, it.newPrice, it.oldQty, qtyCalc(it, S, res) || null, it.newQty,
 dupText(it, res) + (mg ? ' → ' + (E.fmtN(mg.newPrice ?? 0)) + ' @ ' + (E.fmtN(mg.newQty ?? 0)) : '') || null,
 it.flags.filter(f => FLAG[f] && f !== 'fromName').map(f => FLAG[f]).join(', ') || null,
 it.excluded ? 'Excluded' : it.converted ? 'Converted' : 'Unchanged',
@@ -153,12 +157,12 @@ kv('Confidence', ['sure', 'likely', 'guess'].map(c => c + ': ' + (st.conf[c] || 
 kv('Need a look', st.issues + (st.conflicts ? ' · ' + st.conflicts + ' name/unit conflicts' : '') + (st.noSize ? ' · ' + st.noSize + ' containers with no size' : '') + (st.multi ? ' · ' + st.multi + ' names with several sizes' : ''));
 L.push([]);
 sec('Rounding');
-kv('Price', S.priceDec + ' decimals, ' + S.priceMode);
-kv('Quantity', S.qtyDec + ' decimals, ' + S.qtyMode);
+kv('Price', roundText(res, 'price', S) + ', ' + S.priceMode);
+kv('Quantity', roundText(res, 'qty', S) + ', ' + S.qtyMode);
 L.push([]);
 sec('Duplicates');
 kv('Match', 'Same name' + (S.dupLoose ? ' (ignoring case, spaces, punctuation)' : '') + ' and same new unit' + (S.dupFuzzy ? ', near-duplicates allowed' : ''));
-kv('Default', {smart: 'Smart: merge when prices are within ' + S.tolerance + '%', merge: 'Always merge', keep: 'Keep separate'}[S.dupMode]);
+kv('Default', {smart: 'Smart: merge when prices are within ' + S.tolerance + '%', merge: 'Always merge', keep: 'Keep separate, merge only what you choose'}[S.dupMode]);
 kv('Merged price', {weighted: 'Weighted by qty', avg: 'Average', max: 'Highest', min: 'Lowest', first: 'First row', last: 'Last row'}[S.mergeRule]);
 kv('Groups', st.groups + ' found · ' + st.merged + ' merged · ' + st.review + ' to review');
 const fams = Object.values(res.fams);
@@ -186,5 +190,5 @@ const nm = rs.nm || (name ? E.readName(name, ctx.R) : null);
 return {rs, nm};
 }
 
-return {TSRC, FLAG, READ, MODES, SOURCES, LEVELS, MULTI, ORDER, clue, readAs, why, priceCalc, qtyCalc, dupText, logicRows, about, bench, HEAD};
+return {TSRC, FLAG, READ, MODES, SOURCES, LEVELS, MULTI, ORDER, clue, readAs, why, priceCalc, qtyCalc, roundText, dupText, logicRows, about, bench, HEAD};
 })();

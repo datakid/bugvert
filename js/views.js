@@ -88,17 +88,20 @@ const G = r.groups;
 const counts = {all: G.length, review: G.filter(g => g.review).length, merged: G.filter(g => g.mode === 'merge').length, kept: G.filter(g => g.mode === 'keep').length};
 if (!counts[dupFilter] && dupFilter !== 'all') dupFilter = 'all';
 const list = G.filter(g => dupFilter === 'all' || (dupFilter === 'review' ? g.review : dupFilter === 'merged' ? g.mode === 'merge' : g.mode === 'keep'));
+const smartList = list.filter(g => g.smartOk && g.mode !== 'merge' && !g.manual);
+const smartN = smartList.length;
 A.paint(main, `
 <section class="view-head">
-<div><h2>Duplicates</h2><p>Same name and same new unit. ${st.S.dupMode === 'smart' ? `Merged on their own when prices are within ${st.S.tolerance}%, otherwise left for you.` : st.S.dupMode === 'merge' ? 'Merged by default.' : 'Kept separate by default.'} <button class="link" id="dup-set">Change</button></p></div>
+<div><h2>Duplicates</h2><p>Same name and same new unit. ${st.S.dupMode === 'smart' ? `Merged on their own when prices are within ${st.S.tolerance}%, otherwise left for you.` : st.S.dupMode === 'merge' ? 'All merged by default.' : 'Kept separate, as in your file. Merge only the ones you pick, or use Smart merge.'} <button class="link" id="dup-set">Change</button></p></div>
 </section>
 ${G.length ? `<div class="dup-bar" id="dup-bar"><div id="dup-seg"></div><span class="grow"></span>
-<button class="btn ghost sm" id="dup-merge-all">${icon('merge')}Merge shown</button><button class="btn ghost sm" id="dup-keep-all">${icon('split')}Keep shown separate</button>${G.some(g => !g.auto) ? `<button class="btn ghost sm" id="dup-auto">${icon('reset')}All auto</button>` : ''}</div>
+${smartN ? `<button class="btn primary sm" id="dup-smart" title="Merge groups whose prices are within ${st.S.tolerance}% and names match exactly">${icon('spark')}Smart merge ${smartN}</button>` : ''}<button class="btn ghost sm" id="dup-merge-all">${icon('merge')}Merge shown</button><button class="btn ghost sm" id="dup-keep-all">${icon('split')}Keep shown separate</button>${G.some(g => !g.auto) ? `<button class="btn ghost sm" id="dup-auto">${icon('reset')}All auto</button>` : ''}</div>
 <section class="dup-list" id="dup-list">${list.map(g => groupCard(g)).join('')}</section>` : `<div class="empty-card big" id="dup-empty">${icon('dups')}<b>No duplicates</b><span>Every name and unit pair is unique. To combine rows by hand, select them in the Sheet and press Merge.</span></div>`}`);
 $('#dup-set', main).onclick = () => { A.settingsFocus = 'dups'; A.go('settings'); };
 if (!G.length) return;
 seg($('#dup-seg', main), {value: dupFilter, options: [{value: 'all', label: 'All', count: counts.all}, {value: 'review', label: 'Review', count: counts.review}, {value: 'merged', label: 'Merged', count: counts.merged}, {value: 'kept', label: 'Separate', count: counts.kept}], onChange: v => { dupFilter = v; this.render(main); }});
 $('#dup-merge-all', main).onclick = () => A.groupMode(list, 'merge');
+const sm = $('#dup-smart', main); if (sm) sm.onclick = () => A.groupMode(smartList, 'merge');
 $('#dup-keep-all', main).onclick = () => A.groupMode(list, 'keep');
 const au = $('#dup-auto', main); if (au) au.onclick = () => ST.commit('Duplicates back to auto', d => { d.groups = {}; });
 $$('.dg', main).forEach(card => wireGroup(card, r));
@@ -347,11 +350,12 @@ ${row('Remember packs per item', `Learns “Amoxicillin 500 = 8 C” from files 
 </article>
 <article class="card set" id="set-round">${secHead('round')}
 <div class="set-body">
+<p class="set-note">Auto reads the decimals already used in your file and adds only as many as the converted numbers need, so 17.115 ÷ 10 keeps 1.7115 and 3.15 × 10 stays 31.5.</p>
 <h4 class="set-sub">Price</h4>
-${row('Decimals', '', '<div id="s-pdec"></div>')}
+${row('Decimals', decHint('price', S.priceDec), '<div class="dec-ctl"><div id="s-pdec-m"></div><div id="s-pdec"></div></div>')}
 ${row('Rounding', '', '<div id="s-pmode"></div>')}
 <h4 class="set-sub">Quantity</h4>
-${row('Decimals', '', '<div id="s-qdec"></div>')}
+${row('Decimals', decHint('qty', S.qtyDec), '<div class="dec-ctl"><div id="s-qdec-m"></div><div id="s-qdec"></div></div>')}
 ${row('Rounding', 'Round down to avoid counting stock you don’t have', '<div id="s-qmode"></div>')}
 </div>
 </article>
@@ -365,9 +369,9 @@ ${row('Drop the 1', '“T” instead of “1 T”', sw(S.hideOne, 'data-k="hideO
 </article>
 <article class="card set" id="set-dups">${secHead('dups')}
 <div class="set-body">
-${row('Default action', '', '<div id="s-dmode"></div>')}
+${row('Default action', 'Separate keeps every row as it is in the file. Use Smart merge or Merge in the Duplicates tab when you want to combine', '<div id="s-dmode"></div>')}
 ${row('Merged price', '', '<button id="s-mrule"></button>')}
-${row('Price tolerance', 'Smart merges only when prices are this close', '<div id="s-tol"></div>')}
+${row('Price tolerance', 'Smart merge only combines rows whose prices are this close', '<div id="s-tol"></div>')}
 ${row('Loose name match', 'Ignore case, spaces and punctuation', sw(S.dupLoose, 'data-k="dupLoose" aria-label="Loose name match"'))}
 ${row('Near-duplicate names', 'Match small typos, word order and mg/tab noise. Always sent to review', sw(S.dupFuzzy, 'data-k="dupFuzzy" aria-label="Near-duplicate names"'))}
 </div>
@@ -398,13 +402,19 @@ $$('.switch[data-k]', main).forEach(b => b.onclick = () => set({[b.dataset.k]: !
 seg($('#s-theme', main), {value: S.theme || 'system', options: A.THEMES, onChange: v => set({theme: v})});
 seg($('#s-density', main), {value: S.density, options: [{value: 'comfy', label: 'Comfy'}, {value: 'compact', label: 'Compact'}], onChange: v => set({density: v})});
 stepper($('#s-pack', main), {value: S.packSize, min: 1, max: 1000, onChange: v => set({packSize: v})});
-stepper($('#s-pdec', main), {value: S.priceDec, min: 0, max: 8, onChange: v => set({priceDec: v})});
-stepper($('#s-qdec', main), {value: S.qtyDec, min: 0, max: 8, onChange: v => set({qtyDec: v})});
+[['priceDec', 'price', '#s-pdec'], ['qtyDec', 'qty', '#s-qdec']].forEach(([k, rk, id]) => {
+const isAuto = S[k] === 'auto';
+const cur = curDec(rk, S[k]);
+seg($(id + '-m', main), {value: isAuto ? 'auto' : 'fixed', options: [{value: 'auto', label: 'Auto'}, {value: 'fixed', label: 'Fixed'}], onChange: v => set({[k]: v === 'auto' ? 'auto' : cur})});
+const sp = $(id, main);
+sp.hidden = isAuto;
+if (!isAuto) stepper(sp, {value: S[k] | 0, min: 0, max: 8, onChange: v => set({[k]: v})});
+});
 const modes = [{value: 'nearest', label: 'Nearest'}, {value: 'up', label: 'Up'}, {value: 'down', label: 'Down'}];
 seg($('#s-pmode', main), {value: S.priceMode, options: modes, onChange: v => set({priceMode: v})});
 seg($('#s-qmode', main), {value: S.qtyMode, options: modes, onChange: v => set({qtyMode: v})});
 seg($('#s-style', main), {value: S.unitStyle, options: [{value: 'file', label: 'As in file'}, {value: 'short', label: 'Tab'}, {value: 'long', label: 'Tablets'}], onChange: v => set({unitStyle: v})});
-seg($('#s-dmode', main), {value: S.dupMode, options: [{value: 'smart', label: 'Smart'}, {value: 'merge', label: 'Merge'}, {value: 'keep', label: 'Separate'}], onChange: v => set({dupMode: v})});
+seg($('#s-dmode', main), {value: S.dupMode, options: [{value: 'keep', label: 'Separate'}, {value: 'smart', label: 'Smart'}, {value: 'merge', label: 'Merge all'}], onChange: v => set({dupMode: v})});
 select($('#s-mrule', main), {value: S.mergeRule, options: RULES, onChange: v => set({mergeRule: v})});
 stepper($('#s-tol', main), {value: S.tolerance, min: 0, max: 1000, suffix: '%', onChange: v => set({tolerance: v})});
 select($('#s-preset', main), {value: S.preset, options: [{value: 'clean', label: 'Clean'}, {value: 'side', label: 'Side by side'}, {value: 'full', label: 'Everything'}].concat(S.layout ? [{value: 'mine', label: 'My default'}] : []), onChange: v => set({preset: v})});
@@ -435,6 +445,18 @@ else if (A.switching) { A.settingsSec = 'detect'; markNav('detect'); }
 },
 update() { this.render($('#view')); }
 };
+function curDec(k, setting) {
+const r = st.src ? ST.res() : null;
+if (r && r.round) return r.round[k].d;
+return setting === 'auto' ? (k === 'price' ? 2 : 0) : setting | 0;
+}
+function decHint(k, setting) {
+const r = st.src ? ST.res() : null;
+if (setting !== 'auto') return 'Always ' + (setting | 0);
+if (!r || !r.round) return 'Picked from each file';
+const x = r.round[k];
+return 'This file: ' + x.d + (x.d === x.src ? ' (same as the file)' : ' (file uses ' + x.src + ')');
+}
 function labelPrev(S) {
 const ex = st.src ? ST.res().items.find(i => i.converted && i.family === 'tab') || ST.res().items.find(i => i.converted) : null;
 return ex ? `<span class="upill">${esc(ex.unitRaw)}</span>${icon('arrow', 'was-ar')}<span class="upill conv">${esc(ex.newUnit)}</span>` : `<span class="upill">10 T</span>${icon('arrow', 'was-ar')}<span class="upill conv">${esc((S.hideOne ? '' : '1' + (S.unitSpace ? ' ' : '')) + (S.unitStyle === 'short' ? 'Tab' : S.unitStyle === 'long' ? 'Tablet' : 'T'))}</span>`;

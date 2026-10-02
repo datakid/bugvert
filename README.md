@@ -23,6 +23,12 @@ A browser app that takes a messy pharmacy or inventory sheet (xlsx, xls, ods, cs
 - **Settings redesign.** A sticky section nav (a left rail on desktop, scrollable pills on mobile) with scroll-spy. There are nine numbered cards, each with an icon, a title and a one-line purpose: Detection, Name patterns, Conversion, Rounding, Unit labels, Duplicates, Rows & columns, Dictionary, Appearance. Long cards have labelled subsections. Links from other tabs ("Change", "Tune") jump to and highlight the right card.
 - **Bug fixes.** Undo now works after column preset changes. Reorder arrows skip hidden or stale columns and are disabled at the ends. Bulk "Keep separate", merge and exclude no longer render twice. Removing chips from tag or dictionary lists always uses current settings. The Export file name is kept while typing during re-renders. Export counts no longer recompute three times. You are asked to confirm before replacing a file that has edits (drop, browse or sample). Drag-sort handles `pointercancel`. Stepper buttons are disabled at their limits. Modal Tab/Enter/Escape handling is fixed and modals can't close twice. Column widths reset when a new file opens. Active-cell lookup is correct inside expanded merged groups. The inline editor commits when its row scrolls out of the virtual window.
 
+## Ship polish
+- **Automatic rounding.** Price and quantity decimals now default to **Auto**. bugvert reads the most decimals the file already uses (price at least 2, quantity at least 0). It then adds only as many as the converted values need, up to 6 for price and 4 for quantity, and ignores the top 2% of outliers. Examples: 17.115 ÷ 10 → 1.7115, and 3.15 × 10 → 31.5 at 2 dp. Settings → Rounding has an Auto / Fixed switch for each one, and the hint shows what this file got. The Logic sheet and the "How it works" sheet show the decimals that were actually used.
+- **Duplicates are kept separate by default.** Users have usually already decided, so `dupMode` now defaults to `keep` and nothing is merged behind your back. The Duplicates tab has a **Smart merge N** button (merges only groups whose prices fall within the tolerance and whose names match exactly), "Merge shown", and per-group Merge/Separate. In Settings the order is Separate / Smart / Merge all. The Review filter only counts groups when an auto mode is on.
+- **Settings migration.** Saved settings with the old defaults (`priceDec 4`, `qtyDec 2`, `dupMode smart`) move to the new defaults once (`sv: 3`). Values you changed yourself are kept.
+- **Merge all sheets** now matches headers loosely across sheets (ignoring case, spaces and punctuation), so `Unit Price` and `unit price` end up in one column.
+
 ## Architecture
 ```
 source rows (never changed) + doc (your edits) + settings + pack memory
@@ -42,7 +48,7 @@ source rows (never changed) + doc (your edits) + settings + pack memory
 sessionStorage `bugvert2.tab` (last open tab for this browser tab). localStorage: `bugvert2.settings` (detection keys: `unitSource`, `nameMode`, `nameConf`, `namePats`, `nameMin`, `nameMax`, `nameMulti`, `flagConflict`, `guardWords`, `extraMeasures`, `order`, plus `expLogic`), `bugvert2.memory`, `bugvert2.session` (`src`, `doc`, `view`, `ts`). The old `useName:false` setting is migrated to `nameMode:'off'`.
 
 ## Not yet implemented
-- Choosing which sheets to merge; header synonym mapping across sheets
+- Choosing which sheets to merge; header synonym mapping across sheets (e.g. `Price` ↔ `السعر`). Loose matching is done.
 - Per-column override of the name column used for size reading
 
 ## Next steps

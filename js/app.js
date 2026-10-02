@@ -208,17 +208,18 @@ App.guardReplace = async () => !st.src || !st.undo.length || await confirm({titl
 App.ALL_SHEETS = '__all__';
 App.loadAllSheets = () => {
 if (!st.wb || !st.src || !st.src.sheets) return;
-const heads = [], parts = [];
+const heads = [], keys = [], parts = [];
+const hk = h => E.nameKey(String(h ?? ''), true);
 st.src.sheets.forEach(n => {
 const s = E.ingest(XLSX.utils.sheet_to_json(st.wb.Sheets[n], {header: 1, raw: true, defval: ''}));
 if (!s || !s.rows.length) return;
-s.headers.forEach(h => { if (!heads.includes(h)) heads.push(h); });
-parts.push({n, s});
+s.headers.forEach(h => { const k = hk(h) || h; if (!keys.includes(k)) { keys.push(k); heads.push(h); } });
+parts.push({n, s, keys: s.headers.map(h => hk(h) || h)});
 });
 if (parts.length < 2) return toast('Only one sheet has data', {tone: 'warn', icon: 'alert'});
 const tag = heads.includes('Sheet') ? 'Source sheet' : 'Sheet';
 const grid = [heads.concat(tag)];
-parts.forEach(({n, s}) => { const idx = heads.map(h => s.headers.indexOf(h)); s.rows.forEach(r => grid.push(idx.map(i => i < 0 ? '' : r[i]).concat(n))); });
+parts.forEach(({n, s, keys: sk}) => { const idx = keys.map(k => sk.indexOf(k)); s.rows.forEach(r => grid.push(idx.map(i => i < 0 ? '' : r[i]).concat(n))); });
 App.loadGrid(grid, st.src.name, st.wb, App.ALL_SHEETS);
 };
 App.loadSheet = name => {

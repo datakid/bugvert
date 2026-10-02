@@ -700,6 +700,8 @@ body[data-density="compact"] .upill{height:21px;font-size:12px}
 .set-c .seg-b{padding:0 11px}
 .range{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .range .stepper input{width:52px}
+.dec-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.dec-ctl [hidden]{display:none}
 .prio{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
 .prio li{display:flex;align-items:center;gap:10px;padding:5px 6px 5px 8px;border-radius:12px;background:var(--card2);border:1px solid var(--line);font-size:13px}
 .prio li.fixed{background:transparent;border-style:dashed;color:var(--ink2);padding:9px 12px 9px 8px}

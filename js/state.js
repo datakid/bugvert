@@ -1,12 +1,12 @@
 window.Store = (() => {
 const DEFAULTS = {
 packSize: 10, autoDir: true, repack: false, useMemory: true, useName: true, theme: 'system',
-priceDec: 4, priceMode: 'nearest', qtyDec: 2, qtyMode: 'nearest',
+priceDec: 'auto', priceMode: 'nearest', qtyDec: 'auto', qtyMode: 'nearest',
 unitStyle: 'file', unitSpace: true, hideOne: false,
 nameTpl: '{name}',
-dupMode: 'smart', mergeRule: 'weighted', tolerance: 5, dupLoose: true, dupFuzzy: false,
+dupMode: 'keep', mergeRule: 'weighted', tolerance: 5, dupLoose: true, dupFuzzy: false,
 autoJunk: true, preset: 'clean', layout: null, density: 'comfy',
-fmt: 'xlsx', scope: 'view', aliases: {}, expLogic: true,
+fmt: 'xlsx', scope: 'view', aliases: {}, expLogic: true, sv: 3,
 ...JSON.parse(JSON.stringify(Engine.DET_DEFAULTS)),
 labels: {'new.name': 'Name', 'new.unit': 'New unit', 'new.qty': 'New qty', 'new.price': 'New price', 'new.value': 'New value', 'new.factor': 'Factor'}
 };
@@ -25,7 +25,8 @@ undo: [], redo: [], ver: 0, _res: null, _resVer: -1, listeners: []
 };
 st.S.labels = Object.assign(clone(DEFAULTS.labels), st.S.labels || {});
 st.S.aliases = st.S.aliases || {};
-{ const raw = load(K.S, {}) || {}; if (raw.useName === false && !raw.nameMode) st.S.nameMode = 'off'; delete st.S.useName; }
+{ const raw = load(K.S, {}) || {}; if (raw.useName === false && !raw.nameMode) st.S.nameMode = 'off'; delete st.S.useName;
+if ((raw.sv || 0) < 3) { if (raw.priceDec == null || raw.priceDec === 4) st.S.priceDec = 'auto'; if (raw.qtyDec == null || raw.qtyDec === 2) st.S.qtyDec = 'auto'; if (!raw.dupMode || raw.dupMode === 'smart') st.S.dupMode = 'keep'; st.S.sv = 3; save(K.S, st.S); } }
 st.S.namePats = Object.assign(clone(DEFAULTS.namePats), st.S.namePats || {});
 if (!Array.isArray(st.S.order) || !st.S.order.length) st.S.order = clone(DEFAULTS.order);
 const DET_KEYS = Object.keys(Engine.DET_DEFAULTS).concat(['aliases']);

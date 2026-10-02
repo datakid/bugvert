@@ -628,7 +628,8 @@ if (!label) return fmtN(n);
 if (S.hideOne && n === 1) return label;
 return S.unitSpace ? fmtN(n) + ' ' + label : fmtN(n) + label;
 };
-const PD = S.priceDec, PM = S.priceMode, QD = S.qtyDec, QM = S.qtyMode;
+const PM = S.priceMode, QM = S.qtyMode;
+let PD = 2, QD = 0;
 const order = cfg.order.filter(k => k !== 'default');
 const items = base.map(b => {
 const p = b.parsed, ov = b.ov, flags = [], rs = b.rs;
@@ -660,17 +661,15 @@ if (target == null) { target = S.packSize; tsrc = 'default'; }
 }
 }
 const factor = p && target ? target / p.count : 1;
-const autoPrice = b.price == null ? null : rnd(b.price * factor, PD, PM);
-const autoQty = b.qty == null ? null : rnd(b.qty / factor, QD, QM);
-const newPrice = ov.price != null ? ov.price : autoPrice;
-const newQty = ov.qty != null ? ov.qty : autoQty;
+const rawPrice = b.price == null ? null : b.price * factor;
+const rawQty = b.qty == null ? null : b.qty / factor;
 const same = Math.abs(factor - 1) < 1e-12;
 const keepText = same && tsrc !== 'row' && !!b.unitRaw && rs.src === 'unit' && (S.unitStyle === 'file' || !FAM[p && p.family]) && !(p && famRule(p.family).label);
 const newUnit = p && !keepText ? fmtUnit(target, labelFor(p.family, target, outFam)) : b.unitRaw;
 if (R.price >= 0 && b.price == null && !b.junk) flags.push('noPrice');
 if (R.qty >= 0 && b.qty == null) flags.push('noQty');
 if (b.qty === 0) flags.push('zeroQty');
-if (newQty != null && b.qty != null && Math.abs(b.qty % 1) < 1e-9 && Math.abs(b.qty / factor - Math.round(b.qty / factor)) > 1e-6) flags.push('partial');
+if (ov.qty == null && b.qty != null && Math.abs(b.qty % 1) < 1e-9 && Math.abs(b.qty / factor - Math.round(b.qty / factor)) > 1e-6) flags.push('partial');
 if (rs.noSize && tsrc !== 'row' && tsrc !== 'keep' && doc.dir === 'toBase') flags.push('noSize');
 if (rs.conflict && cfg.flagConflict && tsrc !== 'keep' && tsrc !== 'row') flags.push('nameConflict');
 if (rs.multi && !b.junk && (tsrc === 'default' || tsrc === 'nosize' || !p)) flags.push('nameMulti');
@@ -694,9 +693,21 @@ if (conf === 'sure' && flags.includes('nameConflict')) conf = 'likely';
 return {
 id: 'r:' + b.rid, kind: 'row', rid: b.rid, rids: [b.rid], ov, cells: b.cells, raw: b.raw, name: b.name, unitRaw: b.unitRaw,
 parsed: p, family: p ? p.family : null, count: p ? p.count : null, target, tsrc, factor, rs, conf, outFam,
-oldPrice: b.price, oldQty: b.qty, autoPrice, autoQty, newPrice, newQty, newUnit,
+oldPrice: b.price, oldQty: b.qty, rawPrice, rawQty, autoPrice: null, autoQty: null, newPrice: null, newQty: null, newUnit,
 converted: !!p && Math.abs(factor - 1) > 1e-12, flags, edited, excluded
 };
+});
+const live0 = items.filter(i => !i.excluded);
+const round = {
+price: autoDec(S.priceDec, live0.map(i => i.oldPrice), live0.map(i => i.rawPrice), 2, 6),
+qty: autoDec(S.qtyDec, live0.map(i => i.oldQty), live0.map(i => i.rawQty), 0, 4)
+};
+PD = round.price.d; QD = round.qty.d;
+items.forEach(it => {
+it.autoPrice = rnd(it.rawPrice, PD, PM);
+it.autoQty = rnd(it.rawQty, QD, QM);
+it.newPrice = it.ov.price != null ? it.ov.price : it.autoPrice;
+it.newQty = it.ov.qty != null ? it.ov.qty : it.autoQty;
 });
 const gmap = new Map();
 const fz = !!S.dupFuzzy;
@@ -722,13 +733,14 @@ const spread = prices.length > 1 ? (hi - lo) / Math.max(Math.abs(lo), 1e-9) : 0;
 const conflict = spread * 100 > S.tolerance + 1e-9;
 const manual = k.startsWith('m:');
 const fuzzy = !manual && new Set(members.map(m => nameKey(m.name, S.dupLoose))).size > 1;
-const autoMode = manual ? 'merge' : S.dupMode === 'smart' ? (conflict || fuzzy ? 'keep' : 'merge') : S.dupMode;
+const smartOk = !conflict && !fuzzy;
+const autoMode = manual ? 'merge' : S.dupMode === 'smart' ? (smartOk ? 'merge' : 'keep') : S.dupMode === 'merge' ? 'merge' : 'keep';
 const mode = g.mode || autoMode;
 const outSet = new Set(g.out || []);
 const inc = members.filter(m => !outSet.has(m.rid));
 const rule = g.rule || S.mergeRule;
-const review = (conflict || fuzzy) && !g.mode && !manual;
-const grp = {key: k, name: members[0].name, unit: members[0].newUnit, members, inc, mode, auto: !g.mode, conflict, review, spread, rule, lo, hi, ov: g, manual, fuzzy};
+const review = (conflict || fuzzy) && !g.mode && !manual && S.dupMode !== 'keep';
+const grp = {key: k, name: members[0].name, unit: members[0].newUnit, members, inc, mode, auto: !g.mode, conflict, review, spread, rule, lo, hi, ov: g, manual, fuzzy, smartOk};
 groups.push(grp);
 if (mode === 'merge' && inc.length >= 2) {
 const qs = inc.map(m => m.newQty).filter(v => v != null);
@@ -782,7 +794,32 @@ tsrc: tsrcN, conf: confN, read: readN,
 conflicts: count(i => i.flags.includes('nameConflict')), noSize: count(i => i.flags.includes('noSize')), multi: count(i => i.flags.includes('nameMulti')),
 fromName: count(i => i.flags.includes('fromName')), nameTargets: tsrcN.name || 0
 };
-return {items: out, rowItems: items, fams, famRule, groups, stats, labelFor, fmtUnit, cfg};
+return {items: out, rowItems: items, fams, famRule, groups, stats, labelFor, fmtUnit, cfg, round};
+}
+
+function decOf(v) {
+if (v == null || !isFinite(v)) return 0;
+const s = String(+(+v).toPrecision(12));
+if (s.includes('e-')) return 10;
+const i = s.indexOf('.');
+return i < 0 ? 0 : s.length - i - 1;
+}
+function autoDec(setting, src, raw, floor, cap) {
+if (setting !== 'auto' && setting != null && isFinite(+setting)) return {d: Math.max(0, Math.min(10, setting | 0)), auto: false, src: 0};
+const sv = src.filter(v => v != null && isFinite(v));
+let srcD = 0;
+sv.forEach(v => { const d = decOf(v); if (d > srcD) srcD = d; });
+srcD = Math.min(srcD, cap);
+const start = Math.max(floor, srcD);
+const need = [];
+for (const v of raw) {
+if (v == null || !isFinite(v) || v === 0) continue;
+const e = decOf(rnd(v, cap, 'nearest'));
+need.push(e < cap ? e : Math.min(cap, Math.max(0, 3 - Math.floor(Math.log10(Math.abs(v))))));
+}
+need.sort((a, b) => a - b);
+const p = need.length ? need[Math.min(need.length - 1, Math.floor(need.length * 0.98))] : 0;
+return {d: Math.min(cap, Math.max(start, p)), auto: true, src: srcD};
 }
 
 function mergePrice(list, rule) {
@@ -910,5 +947,5 @@ case 'nin': { const set = new Set((val || []).map(String)); return v => !set.has
 return () => true;
 }
 
-return {ALIASES, FAM, FORMS, PATS, DET_DEFAULTS, PACKABLE, CONTAINER, ISSUE_FLAGS, NEW_COLS, NUM_NEW, CONF_OF, clean, parseNum, isNumCell, parseUnit, buildDict, ingest, detect, detectDirection, guessDir, compute, value, exportCell, buildColumns, viewItems, ruleTest, rnd, nameKey, memKey, famTitle, fmtN, namePack, fuzzyKey, readName, getReader, resolve, makeCtx, detCfg};
+return {ALIASES, FAM, FORMS, PATS, DET_DEFAULTS, PACKABLE, CONTAINER, ISSUE_FLAGS, NEW_COLS, NUM_NEW, CONF_OF, clean, parseNum, isNumCell, parseUnit, buildDict, ingest, detect, detectDirection, guessDir, compute, value, exportCell, buildColumns, viewItems, ruleTest, rnd, autoDec, nameKey, memKey, famTitle, fmtN, namePack, fuzzyKey, readName, getReader, resolve, makeCtx, detCfg};
 })();
