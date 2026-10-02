@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>bugvert 2 · smart unit & price converter</title>
+<title>bugvert 2.5 · smart unit & price converter</title>
 <link rel="icon" href="images/bugvert.jpg" type="image/jpeg">
 <meta name="color-scheme" content="light dark">
 <script>try{var t=(JSON.parse(localStorage.getItem('bugvert2.settings')||'{}')||{}).theme||'system';document.documentElement.dataset.theme=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}</script>
@@ -13,7 +13,7 @@
 </head>
 <body>
 <header id="app-header">
-<button id="brand" class="brand" aria-label="bugvert home"><img src="images/bugvert.jpg" alt="" class="brand-icon"><span class="brand-name">bugvert<sup>2</sup></span></button>
+<button id="brand" class="brand" aria-label="bugvert home"><img src="images/bugvert.jpg" alt="" class="brand-icon"><span class="brand-name">bugvert<sup>2.5</sup></span></button>
 <div id="file-slot"></div>
 <div id="dir-slot"></div>
 <span class="grow"></span>
@@ -31,11 +31,13 @@
 <input type="file" id="file-input" accept=".xlsx,.xls,.xlsm,.ods,.csv,.tsv,.txt" hidden>
 <script src="js/xlsx.full.min.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/logic.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/state.js"></script>
 <script src="js/app.js"></script>
 <script src="js/sheet.js"></script>
 <script src="js/views.js"></script>
+<script src="js/export.js"></script>
 <script>App.boot();</script>
 </body>
 </html>

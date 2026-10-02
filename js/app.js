@@ -21,11 +21,8 @@ value: {label: 'Value', hint: 'Price × quantity, used only for detection'}
 };
 const KIND = {code: 'Code', category: 'Category', other: 'Info'};
 App.ROLES = ROLES;
-App.FLAG = {
-noUnit: 'No unit', badUnit: 'Unit could not be read', unknownUnit: 'Unit word not in the dictionary', noPrice: 'No price', noQty: 'No quantity', zeroQty: 'Quantity is 0',
-partial: 'Quantity no longer whole', review: 'Duplicate prices disagree', edited: 'Edited by you', custom: 'Custom pack size', merged: 'Merged duplicates', dup: 'Has duplicates kept separate', junk: 'Empty row'
-};
-App.TSRC = {rule: 'Unit rule', unit: 'Unit default', default: 'Default pack size', memory: 'Remembered pack', name: 'Read from item name', row: 'Set by you', keep: 'Kept as is', off: 'Unit not converted', already: 'Already a pack', none: ''};
+App.FLAG = Logic.FLAG;
+App.TSRC = Logic.TSRC;
 
 App.roleOf = i => Object.keys(st.doc.roles).find(r => st.doc.roles[r] === i) || null;
 let numMemo = new Map();
@@ -156,7 +153,7 @@ ST.on(App.refresh);
 
 App.setDir = dir => {
 const label = dir === 'toBase' ? 'Pack → single' : 'Single → pack';
-ST.commit('Change direction', d => { d.dir = dir; });
+ST.commit('Change direction', d => { d.dir = dir; d.dirTouched = dir !== (d.dirAuto && d.dirAuto.dir); });
 toast(label + (dir === 'toPack' ? ` · default pack ${st.S.packSize}` : ''), {icon: dir === 'toBase' ? 'split' : 'merge'});
 };
 
@@ -251,7 +248,28 @@ const SAMPLE = `الصرف\tالرقم\tالاسم\tالوحدة\tالرصيد\t
 \t\t\t\t\t\t\t
 مجاني\t049 A\tParacetamol 500\t12 Pill\t100\t9.0000\t900.0000\tباطنة
 مجاني\t051 A\tCetirizine 10\t20 Lozng\t12\t16.0000\t192.0000\tباطنة`;
+const SAMPLE2 = `Code\tItem name\tUnit\tStock\tUnit price\tValue
+P01\tPanadol Extra 500mg 24s\t1 T\t480\t0.75\t360
+P02\tBrufen 400mg x 30\tTab\t300\t0.9\t270
+P03\tAugmentin 1g 2x7\t1 T\t140\t3.2\t448
+P04\tNexium 40mg 14 tablets\t1 T\t280\t2.1\t588
+P05\tLosec 20mg caps 28\tCap\t112\t1.4\t156.8
+P06\tConcor 5mg 30 F.C. Tabs\t1 T\t300\t0.6\t180
+P07\tAmoxicillin 500\t1 C\t200\t0.5\t100
+P08\tVitamin D3 50000IU 4 caps\t1 C\t40\t5\t200
+P09\tOmega 3 1000mg 30 softgels\t1 C\t90\t0.8\t72
+P10\tGlucophage 1000mg 3 strips of 10\tTab\t600\t0.25\t150
+P11\tNeurobion 3 amp\t1 Amp\t30\t4\t120
+P12\tAugmentin 875/125mg 14 tab\t\t70\t2.8\t196
+P13\tCetirizine 10\t1 T\t100\t0.3\t30
+P14\tVoltaren 50mg 20 E.C tabs\tBox\t10\t24\t240
+P15\tLipitor 20 mg\tBox\t12\t95\t1140
+P16\tZyrtec 10mg 20s\t10 T\t30\t8\t240
+P17\tParacetamol 500 \u0645\u062c\u0645 24 \u0642\u0631\u0635\t\u0642\u0631\u0635\t240\t0.5\t120
+P18\tInsulin Glargine 100u/ml pen\tSyringe\t25\t60\t1500
+P19\tPanadol Extra 500mg 24s\t1 T\t96\t0.75\t72`;
 App.loadSample = () => App.loadText(SAMPLE, 'sample-pharmacy');
+App.loadSample2 = () => App.loadText(SAMPLE2, 'sample-singles');
 
 App.views.source = {
 render(main) {
@@ -276,6 +294,7 @@ main.innerHTML = `
 ${d.dir === 'toPack' ? `<div class="dir-pack"><span>Default pack size</span><div id="src-pack"></div><small>Per unit and per item sizes live in Units and the Sheet.</small></div>` : ''}
 </article>
 </section>
+${detCard(r)}
 <section class="card src-cols">
 <header class="sec-head"><div><h3>Columns</h3><p>Picked from what's inside each column, not just the header. Tap a tag to change it.</p></div>
 <div class="role-legend">${Object.keys(ROLES).filter(k => k !== 'value').map(k => `<span class="rl ${d.roles[k] >= 0 ? '' : 'missing'}"><i class="role-dot r-${k}"></i>${ROLES[k].label}${d.roles[k] >= 0 ? '' : ' · missing'}</span>`).join('')}</div></header>
@@ -294,8 +313,40 @@ $('#open-sheet', main).onclick = () => App.go('sheet');
 const sp = $('#sheet-pick', main);
 if (sp) select(sp, {value: src.sheet, options: src.sheets.map(n => ({value: n, label: n, icon: 'sheet'})).concat([{value: App.ALL_SHEETS, label: 'All sheets merged', hint: 'Rows stacked, columns matched by header', icon: 'layers'}]), onChange: async n => { if (n === src.sheet) return; if (st.undo.length && !await confirm({title: 'Switch sheet?', body: 'Edits made on this sheet will be lost.', ok: 'Switch'})) return; App.loadSheet(n); }});
 $$('.role-tag', main).forEach(b => b.onclick = () => roleMenu(b, +b.dataset.i));
+$$('[data-det]', main).forEach(b => b.onclick = () => {
+const k = b.dataset.det;
+if (k === 'settings') { App.settingsFocus = 'detect'; return App.go('settings'); }
+st.view = {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null};
+if (k.startsWith('f:')) { st.view.quick = E.ISSUE_FLAGS.includes(k.slice(2)) ? 'issues' : 'all'; st.view.flag = k.slice(2); }
+else if (k.startsWith('t:')) st.view.tsrc = k.slice(2);
+else if (k.startsWith('c:')) st.view.conf = k.slice(2);
+App.go('sheet');
+});
+const ns = $('#det-name-seg', main);
+if (ns) seg(ns, {value: st.S.nameMode, options: [{value: 'off', label: 'Off'}, {value: 'fill', label: 'Fill gaps'}, {value: 'prefer', label: 'Prefer name'}], onChange: v => ST.setS({nameMode: v})});
 }
 };
+
+function detCard(r) {
+const s = r.stats, tot = (s.conf.sure || 0) + (s.conf.likely || 0) + (s.conf.guess || 0);
+const pct = k => tot ? Math.round((s.conf[k] || 0) / tot * 100) : 0;
+const chip = (key, label, nn, tone) => nn ? `<button class="det-chip ${tone || ''}" data-det="${key}"><b>${nn}</b>${esc(label)}</button>` : '';
+return `<section class="card det-card">
+<header class="sec-head"><div><h3>${icon('spark')}Detection</h3><p>How each row's unit and size were worked out. Click any number to see those rows.</p></div>
+<div class="det-tools"><span class="muted">Sizes in names</span><div id="det-name-seg"></div><button class="btn ghost sm" data-det="settings">${icon('settings')}Tune</button></div></header>
+<div class="det-body">
+<div class="det-meter" title="Confidence">${tot ? ['sure', 'likely', 'guess'].map(k => `<i class="dm-${k}" style="width:${pct(k)}%"></i>`).join('') : '<i class="dm-none" style="width:100%"></i>'}</div>
+<div class="det-legend">${['sure', 'likely', 'guess'].map(k => `<button class="dl dl-${k}" data-det="c:${k}"><i></i><b>${s.conf[k] || 0}</b>${k}</button>`).join('')}</div>
+<div class="det-chips">
+${chip('t:name', 'pack sizes read from names', s.tsrc.name, 'ok')}
+${chip('f:fromName', 'units read from names', s.fromName, 'ok')}
+${chip('t:memory', 'remembered packs', s.tsrc.memory, 'ok')}
+${chip('t:default', 'used the default pack', s.tsrc.default, 'warn')}
+${chip('f:nameConflict', 'name and unit disagree', s.conflicts, 'warn')}
+${chip('f:noSize', 'containers with no size', s.noSize, 'warn')}
+${chip('f:nameMulti', 'names with several sizes', s.multi, 'warn')}
+</div></div></section>`;
+}
 
 function colCard(h, i) {
 const d = st.doc;
@@ -335,7 +386,7 @@ const ses = ST.savedSession();
 main.innerHTML = `
 <section class="hero">
 <div class="hero-copy">
-<span class="eyebrow">${icon('spark')}bugvert 2</span>
+<span class="eyebrow">${icon('spark')}bugvert 2.5</span>
 <h2>Drop a sheet.<br><em>Get every unit right.</em></h2>
 <p>Name, unit, price and quantity are found from what's in the cells. Packs and singles are rescaled, duplicates sorted out, and every row stays yours to change.</p>
 </div>
@@ -347,7 +398,7 @@ main.innerHTML = `
 </button>
 <div class="paste-card">
 <textarea id="paste-input" placeholder="…or paste rows straight from Excel" spellcheck="false" aria-label="Paste data"></textarea>
-<div class="pc-act"><button class="btn ghost" id="sample-btn">${icon('spark')}Try a sample</button><button class="btn primary" id="parse-btn">Analyze${icon('arrow')}</button></div>
+<div class="pc-act"><button class="btn ghost" id="sample-btn">${icon('spark')}Try a sample${icon('chevron')}</button><button class="btn primary" id="parse-btn">Analyze${icon('arrow')}</button></div>
 </div>
 </div>
 ${ses ? `<button class="resume" id="resume-btn"><span class="rs-ic">${icon('reset')}</span><span><b>Continue “${esc(ses.src.name)}”</b><small>${ses.src.rows.length} rows · saved ${new Date(ses.ts).toLocaleString()}</small></span>${icon('arrow')}</button>` : ''}
@@ -364,7 +415,7 @@ dz.onclick = App.pickFile;
 dz.addEventListener('drop', e => e.dataTransfer.files[0] && App.readFile(e.dataTransfer.files[0]));
 $('#parse-btn', main).onclick = () => App.loadText($('#paste-input', main).value);
 $('#paste-input', main).addEventListener('paste', () => setTimeout(() => App.loadText($('#paste-input', main).value), 0));
-$('#sample-btn', main).onclick = App.loadSample;
+$('#sample-btn', main).onclick = e => menu(e.currentTarget, [{head: 'Samples'}, {label: 'Packs sheet', hint: 'Pack → single, units in their own column', icon: 'split', run: App.loadSample}, {label: 'Singles sheet', hint: 'Single → pack, pack sizes inside item names', icon: 'merge', run: App.loadSample2}]);
 if (ses) $('#resume-btn', main).onclick = () => { ST.resume(); App.go('sheet'); toast('Session restored', {icon: 'reset'}); };
 }
 

@@ -86,7 +86,7 @@ $('#sheet-more', main).onclick = e => menu(e.currentTarget, [
 {label: 'Expand all merged', icon: 'chevron', run: () => { ST.res().items.forEach(i => i.kind === 'merged' && st.expanded.add(i.id)); refresh(); }},
 {label: 'Collapse all merged', icon: 'right', run: () => { st.expanded.clear(); refresh(); }},
 '-',
-{label: 'Clear filters and sort', icon: 'reset', disabled: !st.view.rules.length && !st.view.sort && !st.view.family && !st.view.flag && !st.view.search, run: clearView}
+{label: 'Clear filters and sort', icon: 'reset', disabled: !st.view.rules.length && !st.view.sort && !st.view.family && !st.view.flag && !st.view.tsrc && !st.view.conf && !st.view.search, run: clearView}
 ], {align: 'end'});
 $('#grid-head', main).onclick = headClick;
 $('#grid-body', main).addEventListener('click', bodyClick);
@@ -97,7 +97,7 @@ refresh();
 update() { if (V.edit) cancelEdit(); refresh(); }
 };
 
-function clearView() { st.view.rules = []; st.view.sort = null; st.view.family = null; st.view.flag = null; st.view.search = ''; const s = $('#sheet-search', V.main); if (s) s.value = ''; refresh(true); }
+function clearView() { st.view.rules = []; st.view.sort = null; st.view.family = null; st.view.flag = null; st.view.tsrc = null; st.view.conf = null; st.view.search = ''; const s = $('#sheet-search', V.main); if (s) s.value = ''; refresh(true); }
 
 function refresh(resetScroll) {
 if (!V.main || !$('#grid', V.main)) return;
@@ -124,11 +124,14 @@ function subBar() {
 const r = ST.res();
 const chips = [];
 if (st.view.quick === 'issues') {
-const fl = ['noPrice', 'badUnit', 'unknownUnit', 'noUnit', 'partial', 'review'];
+const fl = ['nameConflict', 'noSize', 'nameMulti', 'noPrice', 'badUnit', 'unknownUnit', 'noUnit', 'partial', 'review'];
 const c = {};
 r.items.forEach(it => { if (!it.excluded) it.flags.forEach(f => { if (fl.includes(f)) c[f] = (c[f] || 0) + 1; }); });
 fl.filter(f => c[f]).forEach(f => chips.push(`<button class="fchip ${st.view.flag === f ? 'on' : ''}" data-flag="${f}">${A.FLAG[f]}<b>${c[f]}</b></button>`));
 }
+if (st.view.flag && st.view.quick !== 'issues') chips.push(`<span class="rule-chip">${icon('info')}${esc(A.FLAG[st.view.flag] || st.view.flag)}<button data-clr="flag" aria-label="Remove">${icon('x')}</button></span>`);
+if (st.view.tsrc) chips.push(`<span class="rule-chip">${icon('units')}Rule: ${esc(A.TSRC[st.view.tsrc] || st.view.tsrc)}<button data-clr="tsrc" aria-label="Remove">${icon('x')}</button></span>`);
+if (st.view.conf) chips.push(`<span class="rule-chip">${icon('spark')}Confidence: ${esc(st.view.conf)}<button data-clr="conf" aria-label="Remove">${icon('x')}</button></span>`);
 if (st.view.family) chips.push(`<span class="rule-chip">${icon('units')}Unit: ${esc(E.famTitle(st.view.family, r.fams[st.view.family]))}<button data-clr="family" aria-label="Remove">${icon('x')}</button></span>`);
 st.view.rules.forEach((ru, i) => {
 const lbl = V.cols.find(c => c.key === ru.key)?.label || A.colMeta(ru.key).label;
@@ -186,7 +189,8 @@ body.style.height = n * h + 'px';
 body.style.width = totalW() + 'px';
 const empty = $('#grid-empty', V.main);
 empty.classList.toggle('hidden', n > 0);
-if (!n) empty.innerHTML = `<div>${icon('search')}<b>No rows here</b><span>${st.view.rules.length || st.view.search || st.view.family || st.view.flag ? 'Try clearing some filters.' : 'Nothing matches this view.'}</span>${st.view.rules.length || st.view.search || st.view.family || st.view.flag ? '<button class="btn ghost" id="empty-clear">Clear filters</button>' : ''}</div>`;
+const anyF = st.view.rules.length || st.view.search || st.view.family || st.view.flag || st.view.tsrc || st.view.conf;
+if (!n) empty.innerHTML = `<div>${icon('search')}<b>No rows here</b><span>${anyF ? 'Try clearing some filters.' : 'Nothing matches this view.'}</span>${anyF ? '<button class="btn ghost" id="empty-clear">Clear filters</button>' : ''}</div>`;
 const ec = $('#empty-clear', V.main); if (ec) ec.onclick = clearView;
 const top = sc.scrollTop - 36, vh = sc.clientHeight;
 const from = Math.max(0, Math.floor(top / h) - 8), to = Math.min(n, Math.ceil((top + vh) / h) + 8);
@@ -232,7 +236,9 @@ let inner, cls = m.num ? 'num' : '';
 if (k === 'new.unit') {
 const custom = it.tsrc === 'row' || it.tsrc === 'keep';
 const was = V.showOld && it.converted && it.unitRaw ? `<span class="was">${esc(it.unitRaw)}</span>${icon('arrow', 'was-ar')}` : '';
-inner = it.newUnit ? `${was}<span class="upill ${it.converted ? 'conv' : ''} ${custom ? 'custom' : ''} ${it.tsrc === 'memory' ? 'mem' : ''}">${esc(it.newUnit)}</span>` : '<span class="nil">no unit</span>';
+const cd = it.conf && it.conf !== 'sure' && it.kind !== 'merged' ? `<i class="cdot cd-${it.conf}" title="${esc(it.conf)}: ${esc(A.TSRC[it.tsrc] || '')}"></i>` : '';
+const nm = it.tsrc === 'name' || it.rs && it.rs.src !== 'unit' && it.rs.src !== 'none' ? ' nm' : '';
+inner = it.newUnit ? `${was}<span class="upill ${it.converted ? 'conv' : ''} ${custom ? 'custom' : ''} ${it.tsrc === 'memory' ? 'mem' : ''}${nm}">${esc(it.newUnit)}</span>${cd}` : '<span class="nil">no unit</span>';
 cls += ' unit';
 } else if (k === 'new.price' || k === 'new.qty') {
 const f = k === 'new.price' ? 'price' : 'qty';
@@ -486,11 +492,15 @@ const el = popover(anchor, `
 <header><b>${esc(it.name || 'Row ' + (it.rid + 1))}</b><span>source row ${it.rid + 2}${it.excluded ? ' · excluded' : ''}</span></header>
 <dl>
 <dt>Unit</dt><dd>${esc(it.unitRaw || '—')} ${icon('arrow')} <b>${esc(it.newUnit || '—')}</b></dd>
+${it.rs ? `<dt>Read</dt><dd>${esc(Logic.READ[it.rs.src] || '—')}${it.conf ? ` <span class="conf c-${it.conf === 'sure' ? 'high' : it.conf === 'likely' ? 'medium' : 'low'}">${esc(it.conf)}</span>` : ''}</dd>` : ''}
+${it.rs && Logic.clue(it.rs) ? `<dt>Name</dt><dd class="clue">${esc(Logic.clue(it.rs))}</dd>` : ''}
 <dt>Rule</dt><dd>${esc(A.TSRC[it.tsrc] || '—')}${it.factor != null && it.factor !== 1 ? ` · ×${E.fmtN(it.factor)}` : ''}</dd>
 <dt>Price</dt><dd>${esc(fmt(it.oldPrice, 8) || '—')} ${icon('arrow')} <b>${esc(fmt(it.newPrice, 10) || '—')}</b>${it.ov.price != null ? ' <em>edited</em>' : ''}</dd>
 <dt>Qty</dt><dd>${esc(fmt(it.oldQty, 8) || '—')} ${icon('arrow')} <b>${esc(fmt(it.newQty, 10) || '—')}</b>${it.ov.qty != null ? ' <em>edited</em>' : ''}</dd>
 </dl>
+${it.kind !== 'merged' && it.rs ? `<p class="insp-why">${icon('info')}<span>${esc(Logic.why(it, r, st.S, st.doc))}</span></p>` : ''}
 ${flags.length ? `<ul class="insp-flags">${flags.map(f => `<li class="f-${f}">${esc(A.FLAG[f])}</li>`).join('')}</ul>` : ''}
+${it.flags.includes('nameConflict') && it.kind !== 'merged' ? `<button class="insp-link" id="insp-usename">${icon('spark')}<span>Use the name's size <b>${it.rs.nm.count}</b> for this row</span>${icon('right')}</button>` : ''}
 ${g ? `<button class="insp-link" id="insp-dup">${icon('dups')}<span>${g.members.length} rows share this name and unit · <b>${g.mode === 'merge' ? 'merged' : 'kept separate'}</b></span>${icon('right')}</button>` : ''}
 <div class="insp-act">
 <button class="btn ghost sm" id="insp-pack">${icon('units')}Pack size</button>
@@ -503,6 +513,7 @@ $('#insp-pack', el).onclick = () => packPop(anchor, [it]);
 $('#insp-ex', el).onclick = () => { closePop(); setExcluded([it], !it.excluded); };
 const rs = $('#insp-reset', el); if (rs) rs.onclick = () => { closePop(); resetRows([it]); };
 const dl = $('#insp-dup', el); if (dl) dl.onclick = () => { closePop(); A.focusGroup = g.key; A.go('dups'); };
+const un = $('#insp-usename', el); if (un) un.onclick = () => { closePop(); ST.commit('Use size from name', d => { const o = d.rows[it.rid] ||= {}; o.cells ||= {}; o.cells[st.doc.roles.unit] = it.rs.nm.count + ' ' + (it.parsed.tok || ''); }); toast('Unit set to ' + it.rs.nm.count + ' from the name', {icon: 'spark', action: {label: 'Undo', run: () => ST.undo()}}); };
 }
 
 function rowMenu(anchor, it, parent) {

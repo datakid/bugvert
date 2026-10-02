@@ -6,7 +6,8 @@ unitStyle: 'file', unitSpace: true, hideOne: false,
 nameTpl: '{name}',
 dupMode: 'smart', mergeRule: 'weighted', tolerance: 5, dupLoose: true, dupFuzzy: false,
 autoJunk: true, preset: 'clean', layout: null, density: 'comfy',
-fmt: 'xlsx', scope: 'view', aliases: {},
+fmt: 'xlsx', scope: 'view', aliases: {}, expLogic: true,
+...JSON.parse(JSON.stringify(Engine.DET_DEFAULTS)),
 labels: {'new.name': 'Name', 'new.unit': 'New unit', 'new.qty': 'New qty', 'new.price': 'New price', 'new.value': 'New value', 'new.factor': 'Factor'}
 };
 const K = {S: 'bugvert2.settings', M: 'bugvert2.memory', SES: 'bugvert2.session'};
@@ -18,12 +19,16 @@ const st = {
 S: Object.assign(clone(DEFAULTS), load(K.S, {})),
 mem: load(K.M, {}),
 src: null, det: null, doc: null, wb: null,
-view: {quick: 'all', search: '', sort: null, rules: [], family: null},
+view: {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null},
 sel: new Set(), expanded: new Set(),
 undo: [], redo: [], ver: 0, _res: null, _resVer: -1, listeners: []
 };
 st.S.labels = Object.assign(clone(DEFAULTS.labels), st.S.labels || {});
 st.S.aliases = st.S.aliases || {};
+{ const raw = load(K.S, {}) || {}; if (raw.useName === false && !raw.nameMode) st.S.nameMode = 'off'; delete st.S.useName; }
+st.S.namePats = Object.assign(clone(DEFAULTS.namePats), st.S.namePats || {});
+if (!Array.isArray(st.S.order) || !st.S.order.length) st.S.order = clone(DEFAULTS.order);
+const DET_KEYS = Object.keys(Engine.DET_DEFAULTS).concat(['aliases']);
 
 function res() {
 if (!st.src) return null;
@@ -56,27 +61,42 @@ st.undo.push({label: h.label, doc: JSON.stringify(st.doc)});
 st.doc = JSON.parse(h.doc); emit('doc'); return h.label;
 }
 
+function autoDir() {
+if (!st.doc || !st.S.autoDir || st.doc.dirTouched) return;
+const dd = Engine.guessDir(st.src.rows, st.doc.roles, st.S);
+st.doc.dirAuto = dd;
+st.doc.dir = dd.dir;
+}
 function setS(patch) {
 Object.assign(st.S, patch);
 save(K.S, st.S);
+if (st.doc && Object.keys(patch).some(k => DET_KEYS.includes(k))) autoDir();
 emit('settings');
 }
 function resetS() {
-const keepAliases = st.S.aliases, keepTheme = st.S.theme;
-st.S = clone(DEFAULTS); st.S.aliases = keepAliases; st.S.theme = keepTheme;
-save(K.S, st.S); emit('settings');
+const keep = {aliases: st.S.aliases, theme: st.S.theme};
+st.S = Object.assign(clone(DEFAULTS), keep);
+save(K.S, st.S); autoDir(); emit('settings');
+}
+function resetDet() {
+setS(clone(Engine.DET_DEFAULTS));
 }
 
 function learn(force) {
 if (!st.src || (!st.S.useMemory && !force)) return 0;
 const dict = Engine.buildDict(st.S.aliases);
 const R = st.doc.roles;
-if (R.name < 0 || R.unit < 0) return 0;
+if (R.name < 0) return 0;
+const ctx = Engine.makeCtx(st.S);
 let n = 0;
 st.src.rows.forEach(r => {
 const name = Engine.clean(r[R.name]); if (!name) return;
-const p = Engine.parseUnit(r[R.unit], dict);
-if (p && p.known && p.count > 1) { st.mem[Engine.memKey(name)] = {family: p.family, count: p.count}; n++; }
+const x = Engine.resolve(name, R.unit >= 0 ? Engine.clean(r[R.unit]) : '', ctx);
+const p = x.p;
+if (!p || !p.known || !(p.count > 1) || x.conflict) return;
+const fam = p.container ? p.out : p.family;
+if (!Engine.PACKABLE.has(fam)) return;
+st.mem[Engine.memKey(name)] = {family: fam, count: p.count}; n++;
 });
 save(K.M, st.mem);
 return n;
@@ -116,17 +136,17 @@ return base;
 
 function open(src) {
 const det = Engine.detect(src.headers, src.rows, st.S.aliases);
-const dd = Engine.detectDirection(src.headers, src.rows, det.roles.unit, st.S.aliases);
+const dd = Engine.guessDir(src.rows, det.roles, st.S);
 st.src = src; st.det = det;
 st.doc = {
 v: 2, roles: {...det.roles},
 kinds: det.cols.map(c => c.kind), conf: det.cols.map(c => c.conf), reasons: det.cols.map(c => c.reason),
 ignored: det.cols.filter(c => c.garbage).map(c => c.i),
-dir: st.S.autoDir ? dd.dir : 'toBase', dirAuto: dd,
+dir: st.S.autoDir ? dd.dir : 'toBase', dirAuto: dd, dirTouched: false,
 fam: {}, rows: {}, groups: {}, columns: [], colsTouched: false
 };
 st.doc.columns = buildColumns();
-st.view = {quick: 'all', search: '', sort: null, rules: [], family: null};
+st.view = {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null};
 st.sel.clear(); st.expanded.clear();
 st.undo = []; st.redo = [];
 learn();
@@ -147,6 +167,7 @@ if (cur && cur !== role) { d.roles[cur] = prev; if (prev >= 0) swapped = cur; }
 d.roles[role] = col;
 }
 if (!d.colsTouched) d.columns = buildColumnsFor(d);
+if (st.S.autoDir && !d.dirTouched) { const dd = Engine.guessDir(st.src.rows, d.roles, st.S); d.dirAuto = dd; d.dir = dd.dir; }
 });
 return swapped;
 }
@@ -170,10 +191,11 @@ const s = savedSession(); if (!s) return false;
 st.src = s.src; st.doc = s.doc;
 st.det = {roles: s.doc.roles, cols: s.doc.kinds.map((k, i) => ({i, kind: k}))};
 st.undo = []; st.redo = []; st.sel.clear(); st.expanded.clear();
+st.view = {quick: 'all', search: '', sort: null, rules: [], family: null, tsrc: null, conf: null, flag: null};
 emit('open');
 return true;
 }
 function close() { st.src = null; st.doc = null; st.det = null; st.sel.clear(); st.undo = []; st.redo = []; localStorage.removeItem(K.SES); emit('close'); }
 
-return {st, DEFAULTS, res, fresh, emit, on, commit, undo, redo, setS, resetS, learn, remember, clearMem, saveLayout, buildColumns, open, setRole, savedSession, resume, close, clone};
+return {st, DEFAULTS, res, fresh, emit, on, commit, undo, redo, setS, resetS, resetDet, learn, remember, clearMem, saveLayout, buildColumns, open, setRole, savedSession, resume, close, clone};
 })();

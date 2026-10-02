@@ -13,13 +13,14 @@ const tsrc = {};
 r.items.forEach(it => { if (!it.excluded && it.parsed) tsrc[it.tsrc] = (tsrc[it.tsrc] || 0) + 1; });
 main.innerHTML = `
 <section class="view-head">
-<div><h2>Units</h2><p>${toPack ? `Singles become packs. Remembered packs come first, then sizes in item names${st.S.useName ? '' : ' (off)'}, then unit defaults, then <b>${st.S.packSize}</b>.` : 'Packs become singles. Turn a unit off to leave it as it is, or give it a different target.'}</p></div>
+<div><h2>Units</h2><p>${toPack ? `Singles become packs. Order: ${r.cfg.order.map(k => esc(Logic.ORDER[k].toLowerCase())).join(' → ')} → default <b>${st.S.packSize}</b>${r.cfg.nameMode === 'off' ? ' (names off)' : ''}. <button class="link" id="u-tune">Change</button>` : 'Packs become singles. Turn a unit off to leave it as it is, or give it a different target.'}</p></div>
 <div class="vh-stats">${Object.entries(tsrc).filter(([k]) => A.TSRC[k]).map(([k, n]) => `<span class="mini t-${k}"><b>${n}</b>${esc(A.TSRC[k])}</span>`).join('')}</div>
 </section>
 <section class="unit-grid">${known.map(f => unitCard(f, r, toPack)).join('') || '<div class="empty-card">No known units yet. Check the unit column in Source.</div>'}</section>
 ${other.length ? `<section class="sec-block"><header class="sec-head"><div><h3>Unrecognized</h3><p>Tell bugvert what these words mean once. It's saved in your dictionary.</p></div></header>
 <div class="unk-list">${other.map(f => unkRow(f, r)).join('')}</div></section>` : ''}`;
 $$('.uc', main).forEach(card => wireCard(card, r, toPack));
+const ut = $('#u-tune', main); if (ut) ut.onclick = () => { A.settingsFocus = 'detect'; A.go('settings'); };
 $$('.unk', main).forEach(row => {
 const id = row.dataset.f, f = r.fams[id];
 const b = $('.unk-map', row);
@@ -46,7 +47,7 @@ const ex = f.tok ? r.fmtUnit(counts[0][0], f.tok) : '';
 const tgt = rule.target || (toPack ? st.S.packSize : 1);
 const out = r.fmtUnit(tgt, r.labelFor(f.id, tgt));
 return `<article class="uc ${rule.convert ? 'on' : ''}" data-f="${esc(f.id)}">
-<header><div class="uc-t"><b>${esc(f.title)}</b><span>${f.rows} row${f.rows > 1 ? 's' : ''} · ${Object.keys(f.tokens).filter(Boolean).map(esc).join(', ') || '—'}</span></div>${sw(rule.convert, 'data-a="conv" aria-label="Convert ' + esc(f.title) + '"')}</header>
+<header><div class="uc-t"><b>${esc(f.title)}</b><span>${f.rows} row${f.rows > 1 ? 's' : ''}${f.fromName ? ` · ${f.fromName} from names` : ''} · ${Object.keys(f.tokens).filter(Boolean).map(esc).join(', ') || '—'}</span></div>${sw(rule.convert, 'data-a="conv" aria-label="Convert ' + esc(f.title) + '"')}</header>
 <div class="uc-flow"><span class="upill">${esc(ex)}</span>${icon('arrow', 'was-ar')}<span class="upill conv">${rule.convert ? esc(out) : 'unchanged'}</span></div>
 <div class="uc-counts">${counts.slice(0, 6).map(([c, n]) => `<span>${E.fmtN(c)}<b>×${n}</b></span>`).join('')}</div>
 <div class="uc-set ${rule.convert ? '' : 'dim'}">
@@ -253,65 +254,6 @@ addEventListener('pointermove', mv); addEventListener('pointerup', up);
 });
 }
 
-function exportData(scope) {
-A.flushEdit && A.flushEdit();
-const r = ST.fresh();
-const cols = A.visibleCols();
-const items = scope === 'view' ? E.viewItems(r, st.view, cols, st.S) : r.items.filter(i => !i.excluded);
-const head = cols.map(c => A.colLabel(c));
-const rows = items.map(it => cols.map(c => E.value(it, c.key, st.S)));
-return {head, rows, cols, items};
-}
-A.exportData = exportData;
-const viewFiltered = () => st.view.quick !== 'all' || st.view.rules.length || st.view.search || st.view.family || st.view.flag || st.view.sort;
-
-A.views.export = {
-render(main) {
-const scope = viewFiltered() ? st.S.scope : 'all';
-const data = exportData(scope);
-const name = st.src.name + '-bugvert';
-main.innerHTML = `
-<section class="exp">
-<div class="card exp-main">
-<header class="exp-h"><div class="exp-ic">${icon('export')}</div><div><h2>Export</h2><p>Exactly what the sheet shows, recalculated at the moment you export.</p></div></header>
-<div class="exp-sum"><span><b>${data.rows.length}</b> rows</span><span>×</span><span><b>${data.cols.length}</b> columns</span>${ST.res().stats.excluded ? `<span class="muted">${ST.res().stats.excluded} excluded</span>` : ''}</div>
-<div class="exp-opts">
-${viewFiltered() ? `<label><span>Rows</span><div id="exp-scope"></div></label>` : ''}
-<label><span>Format</span><div id="exp-fmt"></div></label>
-<label><span>File name</span><div class="fn"><input class="field" id="exp-name" value="${esc(name)}" spellcheck="false"><em>.${st.S.fmt === 'csv' ? 'csv' : 'xlsx'}</em></div></label>
-</div>
-<div class="exp-act"><button class="btn ghost lg" id="exp-copy">${icon('copy')}Copy</button><button class="btn primary lg" id="exp-dl">${icon('export')}Download</button></div>
-</div>
-<div class="card exp-prev"><header><b>Preview</b><button class="link" id="exp-cols">${icon('columns')}Edit columns</button></header>
-<div class="prev-wrap"><table><thead><tr>${data.head.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${data.rows.slice(0, 12).map(r => `<tr>${r.map(v => `<td class="${typeof v === 'number' ? 'num' : ''}">${esc(typeof v === 'number' ? fmt(v, 10) : v ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>${data.rows.length > 12 ? `<div class="prev-more">+ ${data.rows.length - 12} more rows</div>` : ''}${!data.rows.length ? '<div class="prev-more">Nothing to export</div>' : ''}</div></div>
-</section>`;
-if (viewFiltered()) seg($('#exp-scope', main), {value: st.S.scope, options: [{value: 'view', label: 'Current view', count: exportData('view').rows.length}, {value: 'all', label: 'All rows', count: exportData('all').rows.length}], onChange: v => ST.setS({scope: v})});
-seg($('#exp-fmt', main), {value: st.S.fmt, options: [{value: 'xlsx', label: 'Excel'}, {value: 'csv', label: 'CSV'}], onChange: v => ST.setS({fmt: v})});
-$('#exp-cols', main).onclick = () => A.go('columns');
-$('#exp-copy', main).onclick = () => {
-const d = exportData(scope);
-if (!d.cols.length || !d.rows.length) return toast('Nothing to copy', {tone: 'warn', icon: 'alert'});
-const cell = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
-A.copyText([d.head].concat(d.rows).map(r => r.map(cell).join('\t')).join('\n'));
-};
-$('#exp-dl', main).onclick = () => {
-const d = exportData(viewFiltered() ? st.S.scope : 'all');
-if (!d.cols.length) return toast('Turn on at least one column', {tone: 'warn', icon: 'alert'});
-if (!d.rows.length) return toast('No rows to export', {tone: 'warn', icon: 'alert'});
-const fname = ($('#exp-name', main).value.trim() || name).replace(/[\\/:*?"<>|]+/g, '-');
-const grid = [d.head].concat(d.rows);
-const ws = XLSX.utils.aoa_to_sheet(grid);
-ws['!cols'] = d.head.map((_, c) => ({wch: Math.min(48, Math.max(8, ...grid.slice(0, 300).map(r => String(r[c] ?? '').length + 2)))}));
-const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, ws, 'bugvert');
-if (st.S.fmt === 'csv') XLSX.writeFile(wb, fname + '.csv', {bookType: 'csv'});
-else XLSX.writeFile(wb, fname + '.xlsx');
-toast(`Exported ${d.rows.length} rows`, {icon: 'export'});
-};
-},
-update() { this.render($('#view')); }
-};
-
 A.views.settings = {
 render(main) {
 const S = st.S;
@@ -320,6 +262,7 @@ const al = Object.entries(S.aliases);
 main.innerHTML = `
 <section class="view-head"><div><h2>Settings</h2><p>Saved in this browser and used for every file.</p></div><div class="vh-act"><button class="btn ghost" id="set-reset">${icon('reset')}Reset defaults</button></div></section>
 <section class="set-grid">
+${detPanel(S)}
 <article class="card set" id="set-look"><h3>${icon('sun')}Appearance</h3>
 ${row('Theme', 'System follows your device setting', '<div id="s-theme"></div>')}
 ${row('Row density', '', '<div id="s-density"></div>')}
@@ -328,7 +271,6 @@ ${row('Row density', '', '<div id="s-density"></div>')}
 ${row('Default pack size', 'Used for single → pack when nothing better is known', '<div id="s-pack"></div>')}
 ${row('Detect direction', 'Choose pack → single or single → pack from the data', sw(S.autoDir, 'data-k="autoDir"'))}
 ${row('Repack existing packs', 'In single → pack, also change rows that are already packs', sw(S.repack, 'data-k="repack"'))}
-${row('Pack size from item names', 'Reads “Panadol 24s”, “x 30” or “20 tabs” in single → pack', sw(S.useName, 'data-k="useName"'))}
 ${row('Remember packs per item', `Learns “Amoxicillin 500 = 8 C” from files you open · ${memN} remembered`, sw(S.useMemory, 'data-k="useMemory"'))}
 <div class="set-foot"><button class="link" id="mem-learn">${icon('brain')}Learn from this file</button>${memN ? `<button class="link danger" id="mem-clear">${icon('trash')}Forget all</button>` : ''}</div>
 </article>
@@ -392,10 +334,109 @@ $('#d-tok', main).onkeydown = e => e.key === 'Enter' && $('#d-add', main).click(
 $$('[data-del]', main).forEach(b => b.onclick = () => { const a = {...S.aliases}; delete a[b.dataset.del]; set({aliases: a}); });
 $('#mem-learn', main).onclick = () => { if (!st.src) return toast('Open a file with packs first', {tone: 'warn', icon: 'alert'}); const n = ST.learn(true); ST.emit('settings'); toast(n ? `Learned ${n} pack sizes` : 'No packs found to learn', {icon: 'brain'}); };
 const mc = $('#mem-clear', main); if (mc) mc.onclick = async () => { if (await confirm({title: 'Forget remembered packs?', body: `${memN} items will go back to the default pack size.`, ok: 'Forget', danger: true})) ST.clearMem(); };
-$('#set-reset', main).onclick = async () => { if (await confirm({title: 'Reset settings?', body: 'Rounding, labels, duplicates and column defaults go back to defaults. Your dictionary and memory are kept.', ok: 'Reset'})) ST.resetS(); };
+$('#set-reset', main).onclick = async () => { if (await confirm({title: 'Reset settings?', body: 'Detection, rounding, labels, duplicates and column defaults go back to defaults. Your dictionary and memory are kept.', ok: 'Reset'})) ST.resetS(); };
+wireDet(main, S);
 if (A.settingsFocus) { const c = $('#set-' + A.settingsFocus, main); if (c) { c.scrollIntoView({block: 'center'}); c.classList.add('flash'); } A.settingsFocus = null; }
 },
 update() { const y = $('#view').scrollTop; this.render($('#view')); $('#view').scrollTop = y; }
 };
+function detPanel(S) {
+const cfg = E.detCfg(S);
+const res = st.src ? ST.res() : null;
+const used = {};
+if (res) res.rowItems.forEach(it => { if (it.excluded) return; const nm = it.rs.nm; if (nm && nm.pat && (it.tsrc === 'name' || it.rs.src !== 'unit')) used[nm.pat] = (used[nm.pat] || 0) + 1; });
+const dirty = JSON.stringify(E.DET_DEFAULTS) !== JSON.stringify(Object.fromEntries(Object.keys(E.DET_DEFAULTS).map(k => [k, cfg[k]])));
+const CONF = {high: 'sure', medium: 'likely', low: 'guess'};
+const chips = (list, attr, ph) => `<div class="tag-list">${list.map(w => `<span class="tag-c">${esc(w)}<button data-${attr}="${esc(w)}" aria-label="Remove">${icon('x')}</button></span>`).join('') || '<span class="muted">None</span>'}</div><div class="tag-add"><input class="field sm" id="add-${attr}" placeholder="${esc(ph)}" spellcheck="false"><button class="btn ghost sm" data-add="${attr}">${icon('plus')}Add</button></div>`;
+return `<article class="card set det-set" id="set-detect">
+<header class="det-h"><h3>${icon('spark')}Detection</h3><span class="grow"></span>${dirty ? `<button class="link" id="det-reset">${icon('reset')}Recommended defaults</button>` : '<span class="pill-note">recommended defaults</span>'}</header>
+<p class="muted">How units and pack sizes are found. The defaults work for most sheets: the unit column comes first, and item names only fill gaps when they clearly state a count.</p>
+<div class="det-cols">
+<div class="det-col">
+<h4>Reading units</h4>
+${row('Where units come from', Logic.SOURCES[cfg.unitSource], '<div id="d-src"></div>')}
+${row('Sizes in item names', Logic.MODES[cfg.nameMode].split(': ')[1], '<div id="d-mode"></div>')}
+${row('Certainty needed', Logic.LEVELS[cfg.nameConf].split(': ')[1], '<div id="d-conf"></div>')}
+${row('Name shows several sizes', 'e.g. “24s 12s”', '<div id="d-multi"></div>')}
+${row('Valid pack sizes', 'Counts outside this range are ignored', '<div class="range"><div id="d-min"></div><span>to</span><div id="d-max"></div></div>')}
+${row('Flag name vs unit conflicts', '“Zyrtec 20s” with unit “10 T” goes to Needs a look', sw(cfg.flagConflict, 'data-k="flagConflict"'))}
+<h4>Single → pack priority</h4>
+<p class="muted sm">When a single has to become a pack, the first source that knows a size wins. Your own per-row choice always comes first.</p>
+<ol class="prio" id="d-order">${cfg.order.map((k, i) => `<li data-o="${k}"><span class="prio-n">${i + 1}</span><b>${esc(Logic.ORDER[k])}</b>${k === 'memory' && !S.useMemory ? '<em>off</em>' : ''}<span class="grow"></span><button class="icon-btn" data-mv="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">${icon('sortUp')}</button><button class="icon-btn" data-mv="1" ${i === cfg.order.length - 1 ? 'disabled' : ''} aria-label="Move down">${icon('sortDown')}</button></li>`).join('')}<li class="fixed"><span class="prio-n">${cfg.order.length + 1}</span><b>Default pack size · ${S.packSize}</b><span class="grow"></span><span class="muted">always last</span></li></ol>
+</div>
+<div class="det-col">
+<h4>Name patterns</h4>
+<p class="muted sm">Strengths like 500mg, 875/125, 100u/ml, 2% and decimals are removed first, so they are never read as a pack size.</p>
+<div class="pats">${Object.entries(E.PATS).map(([k, p]) => `<button class="pat ${cfg.namePats[k] ? 'on' : ''}" data-pat="${k}" aria-pressed="${!!cfg.namePats[k]}"><span class="pat-ck">${icon('check')}</span><span class="pat-t"><b>${esc(p.label)}</b><small>${esc(p.ex)}</small></span><span class="conf c-${p.conf}">${CONF[p.conf]}</span>${used[k] ? `<span class="pat-n" title="Rows in this file">${used[k]}</span>` : ''}</button>`).join('')}</div>
+<h4>Protected words</h4>
+<p class="muted sm">A small number right after these words is part of the name, as in Omega 3 or Vitamin B 12.</p>
+${chips(cfg.guardWords, 'guard', 'Word, e.g. zinc')}
+<h4>Extra strength units</h4>
+<p class="muted sm">Numbers followed by these are treated as strength, never pack size.</p>
+${chips(cfg.extraMeasures, 'meas', 'e.g. mu, mega')}
+</div>
+</div>
+<div class="bench">
+<h4>${icon('search')}Try it</h4>
+<div class="bench-in"><input class="field" id="b-name" placeholder="Item name, e.g. Panadol Extra 500mg 24s" value="${esc(A.benchName || 'Augmentin 875/125mg 2x7 F.C. tabs')}" spellcheck="false"><input class="field" id="b-unit" placeholder="Unit (optional)" value="${esc(A.benchUnit ?? '1 T')}" spellcheck="false"></div>
+<div class="bench-out" id="b-out"></div>
+</div>
+</article>`;
+}
+
+function benchHTML(name, unit, S) {
+const {rs, nm} = Logic.bench(name, unit, S);
+const dir = st.doc ? st.doc.dir : 'toBase';
+const CONF = {high: 'sure', medium: 'likely', low: 'guess'};
+const p = rs.p;
+let verdict, target = null;
+if (!p) verdict = 'Nothing readable. The row is left as it is.';
+else if (p.measure) verdict = 'A measure (' + E.fmtN(p.count) + ' ' + p.tok + '), never converted.';
+else if (dir === 'toBase') { if (p.container && rs.noSize) verdict = 'Container with no size: flagged, not split.'; else { target = 1; verdict = 'Pack → single: becomes 1, factor 1 ÷ ' + E.fmtN(p.count) + '.'; } }
+else if (p.count > 1 || p.container) verdict = 'Already a pack' + (S.repack ? '' : ', kept') + '.';
+else if (rs.nameTarget && E.PACKABLE.has(p.family)) { target = rs.nameTarget; verdict = 'Single → pack: pack of ' + rs.nameTarget + ' from the name (if no remembered pack comes first).'; }
+else { target = S.packSize; verdict = 'Single → pack: no size found, uses the default ' + S.packSize + '.'; }
+const steps = [];
+if (nm && nm.strengths.length) steps.push(`<div class="bs"><span class="bs-l">Strength removed</span>${nm.strengths.map(x => `<span class="bt strike">${esc(x)}</span>`).join('')}</div>`);
+if (nm && nm.guarded.length) steps.push(`<div class="bs"><span class="bs-l">Protected</span>${nm.guarded.map(x => `<span class="bt">${esc(x)}</span>`).join('')}</div>`);
+if (nm && nm.cands.length) steps.push(`<div class="bs"><span class="bs-l">Candidates</span>${nm.cands.map(c => `<span class="bt ${c.used ? 'used' : c.ok ? 'ok' : 'no'}" title="${esc(E.PATS[c.pat].label)}">“${esc(c.text)}” → ${c.n}<small>${esc(c.ok ? CONF[c.conf] : c.why)}</small></span>`).join('')}</div>`);
+else if (name) steps.push(`<div class="bs"><span class="bs-l">Candidates</span><span class="muted">No count in the name${nm && nm.form ? ' · form: ' + esc(E.FAM[nm.form][2].toLowerCase()) : ''}</span></div>`);
+if (nm && nm.multi) steps.push(`<div class="bs"><span class="bs-l">Several sizes</span><span class="muted">${esc(Logic.MULTI[E.detCfg(S).nameMulti])}</span></div>`);
+if (unit) steps.push(`<div class="bs"><span class="bs-l">Unit column</span>${rs.u ? `<span class="bt">${esc(unit)} → ${E.fmtN(rs.u.count)} ${esc(rs.u.known ? E.FAM[rs.u.family][rs.u.count === 1 ? 1 : 2].toLowerCase() : rs.u.tok)}</span>` : `<span class="bt no">${esc(unit)}<small>${E.detCfg(S).unitSource === 'name' ? 'ignored' : 'not readable'}</small></span>`}</div>`);
+if (rs.conflict) steps.push(`<div class="bs"><span class="bs-l">Conflict</span><span class="bt no">name ${nm.count} vs unit ${E.fmtN(rs.u.count)}<small>unit wins, row flagged</small></span></div>`);
+return `${steps.join('')}
+<div class="bench-res"><span class="upill">${p ? esc(Logic.READ[rs.src]) : '—'}</span>${p ? `<b>${esc(E.fmtN(p.count))} ${esc(p.container ? 'per box' : E.FAM[p.family] ? E.FAM[p.family][p.count === 1 ? 1 : 2].toLowerCase() : p.tok)}</b>` : ''}${icon('arrow', 'was-ar')}${target != null ? `<span class="upill conv">${E.fmtN(target)}</span>` : ''}<span class="bench-v">${esc(verdict)}</span></div>`;
+}
+
+function wireDet(main, S) {
+const cfg = E.detCfg(S);
+const set = p => ST.setS(p);
+seg($('#d-src', main), {value: cfg.unitSource, options: [{value: 'auto', label: 'Auto'}, {value: 'unit', label: 'Unit column'}, {value: 'name', label: 'Name'}], onChange: v => set({unitSource: v})});
+seg($('#d-mode', main), {value: cfg.nameMode, options: [{value: 'off', label: 'Off'}, {value: 'fill', label: 'Fill gaps'}, {value: 'prefer', label: 'Prefer name'}], onChange: v => set({nameMode: v})});
+seg($('#d-conf', main), {value: cfg.nameConf, options: [{value: 'strict', label: 'Strict'}, {value: 'balanced', label: 'Balanced'}, {value: 'loose', label: 'Loose'}], onChange: v => set({nameConf: v})});
+seg($('#d-multi', main), {value: cfg.nameMulti, options: [{value: 'skip', label: 'Skip'}, {value: 'best', label: 'Most sure'}, {value: 'largest', label: 'Largest'}], onChange: v => set({nameMulti: v})});
+stepper($('#d-min', main), {value: cfg.nameMin, min: 2, max: 500, onChange: v => set({nameMin: Math.min(v, cfg.nameMax)})});
+stepper($('#d-max', main), {value: cfg.nameMax, min: 2, max: 10000, step: 10, onChange: v => set({nameMax: Math.max(v, cfg.nameMin)})});
+$$('[data-pat]', main).forEach(b => b.onclick = () => set({namePats: {...cfg.namePats, [b.dataset.pat]: !cfg.namePats[b.dataset.pat]}}));
+$$('#d-order [data-mv]', main).forEach(b => b.onclick = () => {
+const k = b.closest('li').dataset.o, o = cfg.order.slice(), i = o.indexOf(k), j = i + +b.dataset.mv;
+if (j < 0 || j >= o.length) return;
+[o[i], o[j]] = [o[j], o[i]]; set({order: o});
+});
+const lists = {guard: 'guardWords', meas: 'extraMeasures'};
+Object.entries(lists).forEach(([a, key]) => {
+$$(`[data-${a}]`, main).forEach(b => b.onclick = () => set({[key]: cfg[key].filter(w => w !== b.dataset[a])}));
+const inp = $('#add-' + a, main), add = () => { const w = inp.value.trim().toLowerCase(); if (!w) return inp.focus(); if (!cfg[key].includes(w)) set({[key]: cfg[key].concat(w)}); };
+$(`[data-add="${a}"]`, main).onclick = add;
+inp.onkeydown = e => e.key === 'Enter' && add();
+});
+const dr = $('#det-reset', main);
+if (dr) dr.onclick = () => { ST.resetDet(); toast('Detection back to recommended', {icon: 'reset'}); };
+const bn = $('#b-name', main), bu = $('#b-unit', main), out = $('#b-out', main);
+const paint = () => { A.benchName = bn.value; A.benchUnit = bu.value; out.innerHTML = benchHTML(bn.value, bu.value, st.S); };
+bn.oninput = bu.oninput = paint;
+paint();
+}
+
 function row(t, h, ctl) { return `<div class="set-r"><div class="set-l"><b>${esc(t)}</b>${h ? `<small>${esc(h)}</small>` : ''}</div><div class="set-c">${ctl}</div></div>`; }
 })();
